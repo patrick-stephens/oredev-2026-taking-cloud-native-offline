@@ -1,0 +1,32 @@
+name: offline-cache-demo
+
+services:
+  zot:
+    image: ghcr.io/project-zot/zot-linux-amd64:v2.1.15
+    command: ["serve", "/etc/zot/config.json"]
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - ${ZOT_CONFIG:-./zot-config.json}:/etc/zot/config.json:ro
+      - cache:/var/lib/zot
+    networks:
+      - cache
+      - uplink
+
+  # Share zot's network namespace: localhost:5000 works from this client too.
+  # Each invocation is a fresh container with no image/layer cache.
+  skopeo:
+    image: quay.io/skopeo/stable:v1.20.0
+    profiles: ["tools"]
+    network_mode: service:zot
+    entrypoint: ["skopeo"]
+    volumes:
+      - cache:/cache:ro
+
+networks:
+  cache:
+    internal: true
+  uplink: {}
+
+volumes:
+  cache: {}
