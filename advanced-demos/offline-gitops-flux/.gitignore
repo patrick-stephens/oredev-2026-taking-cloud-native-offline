@@ -1,0 +1,9 @@
+.state/
+.tools/
+*.bundle
+*.key
+*.pem
+*.crt
+*.cert
+id_ed25519
+id_ed25519.pub

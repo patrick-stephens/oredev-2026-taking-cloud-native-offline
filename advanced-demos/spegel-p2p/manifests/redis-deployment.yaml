@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-peer-demo
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis-peer-demo
+  template:
+    metadata:
+      labels:
+        app: redis-peer-demo
+    spec:
+      nodeSelector:
+        spegel.demo/worker: "true"
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: redis-peer-demo
+      containers:
+        - name: redis
+          image: registry:5000/library/redis:alpine
+          imagePullPolicy: Always
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP

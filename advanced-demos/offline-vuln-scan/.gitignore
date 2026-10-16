@@ -1,0 +1,8 @@
+.bundle/
+.work/
+.state/
+.tools/
+artifacts/
+*.key
+*.pem
+*.crt

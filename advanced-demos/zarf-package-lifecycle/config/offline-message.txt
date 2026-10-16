@@ -1,0 +1,1 @@
+This file traveled inside the same Zarf package as the image, chart and Git repository.

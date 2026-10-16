@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubean-lifecycle-vars
+  namespace: kubean-system
+data:
+  group_vars.yml: |
+    kube_version: "1.34.7"
+    container_manager: containerd
+    kube_network_plugin: calico
+    kube_network_plugin_multus: false
+    kube_proxy_mode: iptables
+    enable_nodelocaldns: false
+    etcd_deployment_type: kubeadm
+    ntp_enabled: false
+
+    registry_host: "192.168.56.1:5000"
+    file_service_url: "http://192.168.56.1:8080"
+    files_repo: "{{ file_service_url }}/kubean"
+    github_url: "{{ files_repo }}/github.com"
+    dl_k8s_io_url: "{{ files_repo }}/dl.k8s.io"
+    storage_googleapis_url: "{{ files_repo }}/storage.googleapis.com"
+    get_helm_url: "{{ files_repo }}/get.helm.sh"
+    ubuntu_repo: "{{ file_service_url }}"
+
+    kube_image_repo: "{{ registry_host }}/registry.k8s.io"
+    gcr_image_repo: "{{ registry_host }}/gcr.io"
+    github_image_repo: "{{ registry_host }}/ghcr.io"
+    docker_image_repo: "{{ registry_host }}/docker.io"
+    quay_image_repo: "{{ registry_host }}/quay.io"
+    containerd_registries_mirrors:
+      - prefix: "192.168.56.1:5000"
+        mirrors:
+          - host: "http://192.168.56.1:5000"
+            capabilities: ["pull", "resolve"]
+            skip_verify: true

@@ -1,0 +1,25 @@
+kind: ZarfPackageConfig
+metadata:
+  name: podinfo-offline
+  version: 6.15.0
+  description: Podinfo chart, image, file and Git source for disconnected delivery
+  architecture: amd64
+components:
+  - name: podinfo
+    required: true
+    images:
+      - ghcr.io/stefanprodan/podinfo:6.15.0
+    charts:
+      - name: podinfo
+        version: 6.15.0
+        namespace: podinfo
+        url: https://stefanprodan.github.io/podinfo
+        valuesFiles:
+          - config/values.yaml
+    files:
+      - source: config/offline-message.txt
+        target: /work/artifacts/offline-message.txt
+  - name: source
+    required: true
+    repos:
+      - https://github.com/stefanprodan/podinfo.git@a9b846405af7697629de8a1da335aaf639a09f34

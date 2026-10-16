@@ -1,0 +1,90 @@
+name: offline-preheat
+x-peer: &peer
+  image: dragonflyoss/dfdaemon:${DRAGONFLY_VERSION}
+  pull_policy: never
+  volumes:
+    - ../.state/peer.yaml:/etc/dragonfly/dfget.yaml:ro
+  networks: [harbor]
+  restart: "no"
+  healthcheck:
+    test: ["CMD", "/bin/grpc_health_probe", "-addr=:65000"]
+    interval: 3s
+    timeout: 3s
+    retries: 80
+services:
+  dragonfly-redis:
+    image: ${REDIS_IMAGE}
+    pull_policy: never
+    networks: [harbor]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+  dragonfly-db:
+    image: ${MARIADB_IMAGE}
+    pull_policy: never
+    environment:
+      MARIADB_DATABASE: manager
+      MARIADB_USER: dragonfly
+      MARIADB_PASSWORD: ${DEMO_DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${DEMO_DB_PASSWORD}
+    networks: [harbor]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 2s
+      retries: 90
+  manager:
+    image: dragonflyoss/manager:${DRAGONFLY_VERSION}
+    pull_policy: never
+    volumes:
+      - ../.state/manager.yaml:/etc/dragonfly/manager.yaml:ro
+    networks: [harbor]
+    depends_on:
+      dragonfly-redis: {condition: service_healthy}
+      dragonfly-db: {condition: service_healthy}
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "/bin/grpc_health_probe", "-addr=:65003"]
+      interval: 3s
+      timeout: 3s
+      retries: 80
+  scheduler:
+    image: dragonflyoss/scheduler:${DRAGONFLY_VERSION}
+    pull_policy: never
+    volumes:
+      - ./scheduler.yaml:/etc/dragonfly/scheduler.yaml:ro
+    networks: [harbor]
+    depends_on:
+      manager: {condition: service_healthy}
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "/bin/grpc_health_probe", "-addr=:8002"]
+      interval: 3s
+      timeout: 3s
+      retries: 80
+  seed:
+    <<: *peer
+    volumes:
+      - ../.state/seed.yaml:/etc/dragonfly/dfget.yaml:ro
+    depends_on:
+      scheduler: {condition: service_healthy}
+  peer1: {<<: *peer}
+  peer2: {<<: *peer}
+  peer3: {<<: *peer}
+  peer4: {<<: *peer}
+  peer5: {<<: *peer}
+  gateway:
+    image: ${NGINX_IMAGE}
+    pull_policy: never
+    volumes:
+      - ../.state/gateway:/etc/nginx/conf.d:ro
+    networks:
+      harbor:
+        aliases: [harbor]
+    restart: "no"
+networks:
+  harbor:
+    external: true
+    name: offline-preheat-airgap

@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubean-lifecycle-hosts
+  namespace: kubean-system
+data:
+  hosts.yml: |
+    all:
+      hosts:
+        cp1:
+          ip: 192.168.56.11
+          access_ip: 192.168.56.11
+          ansible_host: 192.168.56.11
+          ansible_connection: ssh
+          ansible_user: vagrant
+        worker1:
+          ip: 192.168.56.12
+          access_ip: 192.168.56.12
+          ansible_host: 192.168.56.12
+          ansible_connection: ssh
+          ansible_user: vagrant
+      children:
+        kube_control_plane:
+          hosts:
+            cp1:
+        kube_node:
+          hosts:
+            cp1:
+            worker1:
+        etcd:
+          hosts:
+            cp1:
+        k8s_cluster:
+          children:
+            kube_control_plane:
+            kube_node:
+        calico_rr:
+          hosts: {}

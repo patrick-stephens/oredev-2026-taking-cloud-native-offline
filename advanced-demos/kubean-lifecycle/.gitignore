@@ -1,0 +1,10 @@
+/.state/
+/.work/
+/artifacts/
+/.vagrant/
+/.env
+*.key
+*.crt
+*.pem
+*kubeconfig*
+*.token

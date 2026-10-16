@@ -1,0 +1,27 @@
+apiVersion: k0s.k0sproject.io/v1beta1
+kind: ClusterConfig
+metadata:
+  name: offline-k0s
+spec:
+  api:
+    address: NODE_IP
+  storage:
+    type: kine
+  telemetry:
+    enabled: false
+  images:
+    default_pull_policy: Never
+  network:
+    provider: kuberouter
+    podCIDR: 10.244.0.0/16
+    serviceCIDR: 10.96.0.0/12
+  workerProfiles:
+    - name: offline
+      values:
+        resolvConf: /etc/offline-pod-resolv.conf
+        evictionHard:
+          nodefs.available: 1Gi
+          imagefs.available: 1Gi
+          nodefs.inodesFree: 1%
+        imageGCHighThresholdPercent: 99
+        imageGCLowThresholdPercent: 98

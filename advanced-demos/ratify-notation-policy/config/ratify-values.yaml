@@ -1,0 +1,25 @@
+image:
+  tag: v1.4.6
+featureFlags:
+  RATIFY_CERT_ROTATION: true
+cosign:
+  enabled: false
+oras:
+  useHttp: true
+  authProviders:
+    k8secretsEnabled: true
+  cache:
+    enabled: false
+provider:
+  timeout:
+    validationTimeoutSeconds: 10
+    mutationTimeoutSeconds: 10
+  cache:
+    enabled: false
+  enableMutation: true
+  mutationExcludedNamespaces:
+    - diagnostics
+policy:
+  useRego: true
+upgradeCRDs:
+  enabled: false

@@ -1,0 +1,4 @@
+/.work/
+/artifacts/
+/apps/*/node_modules/
+/config/verdaccio-htpasswd

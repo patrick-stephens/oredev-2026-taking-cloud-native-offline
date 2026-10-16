@@ -1,140 +1,116 @@
-# Taking cloud-native offline: a signed deployment bundle
+# Taking cloud-native offline: a signed PostgreSQL bundle
 
-A **single-terminal** demo of the offline software supply chain:
+A **single-terminal** demonstration of an offline software supply chain:
 
-1. On a connected build host, download the popular Bitnami **nginx chart** and
-   Docker Hub's official **`nginx:latest`** image.
-2. Sign an inventory that authenticates **every image layer, manifest, config,
-   chart dependency and deployment value**, then create a transport archive.
-3. Receive that archive in an isolated target, verify using an **independently
-   trusted public key**, import into a local zot registry, and deploy with Helm.
-4. Confirm the pod is Ready and serves nginx's welcome page **without internet**.
+1. CONNECTED: **package our own Helm chart**, capture the official PostgreSQL
+   image and sign an inventory of every transported file.
+2. AIR-GAPPED: verify with an independently trusted public key, import into
+   local zot, and deploy the chart using the **authenticated image digest**.
+3. Prove the pod is **Running/Ready**, its PVC **Bound**, and **psql connects
+   using a password over TCP**. Reject a tampered image before importing it.
 
-The application bundle is about 61 MiB for the tested nginx release. Kubernetes
-and the tools are **pre-provisioned infrastructure**, not hidden dependencies
-downloaded during verification.
+There is **no Bitnami chart or image dependency**. This avoids the
+[2025 Bitnami catalog migration](https://github.com/bitnami/containers/issues/83267)
+and demonstrates that `helm package` is useful for your own offline delivery.
+The small [chart](chart/) wraps the official `postgres` image, uses an existing
+Secret, and asks the default StorageClass for a PVC. It is not an HA database
+operator or a production backup/upgrade solution.
 
 ## Architecture and trust boundary
 
 ```text
-CONNECTED BUILD SIDE                      AIR-GAPPED TARGET
+CONNECTED BUILD SIDE                         AIR-GAPPED TARGET
 
-Docker Hub: nginx:latest                   Pre-provisioned kind node
-Bitnami: nginx chart + common dependency    (default internet routes removed)
-          |                                           |
-          v                                           |
-Skopeo -> images/nginx/                                |
-Helm   -> charts/nginx-22.0.11.tgz                      |
-          |                                           |
-SHA-256 inventory: metadata.json                       |
-          |                                           |
-Cosign sign-blob (PRIVATE KEY stays here)               |
-          |                                           |
-          +---- bundle.tar.gz -- removable media ----> safe extraction
-                                                      |
-TRUSTED PUBLIC KEY ---- independent channel ----------> Cosign verify-blob
-                                                      + all file hashes
-                                                      |
-                                             verified Skopeo import
-                                                      |
-                                             zot localhost:5001
-                                                      |
-                                             local chart + Helm
-                                                      |
-                                             nginx@sha256:...
-                                             1/1 Ready + HTTP 200
+chart/ (self-authored, no dependencies)        Pre-provisioned kind node
+  helm package -> charts/*.tgz                 (internet default routes removed)
+Docker Hub: postgres:18.6-alpine3.23                        |
+  skopeo copy -> images/postgres/                          |
+                  |                                       |
+SHA-256 inventory: metadata.json                          |
+Cosign sign-blob (private key stays here)                  |
+                  |                                       |
+                  +-- bundle.tar.gz -- removable media --> safe extraction
+                                                          |
+TRUSTED PUBLIC KEY -- independent channel ----------------> verify-blob
+                                                          + every file hash
+                                                          |
+                                                verified Skopeo import
+                                                          |
+                                                zot localhost:5001
+                                                          |
+                                             Helm -> PostgreSQL@sha256:...
+                                             existing Secret + default-SC PVC
+                                                          |
+                                             Running/Ready, Bound, SQL result
 ```
 
-For the conference, both sides live on one host; the wrapper models transport
-by passing the archive to an isolated target. **No target operation downloads
-from the internet.** Skopeo, zot, Helm, kubectl, containerd and the deployed
-workload run in the node's network namespace (or its pods). Cosign verification
-runs with Docker `--network none`. The host only orchestrates Docker and stays
-connected; it is not itself a physically air-gapped machine.
+For the talk, one Linux host models both machines. The host remains connected
+and orchestrates Docker. Target Helm, kubectl, containerd, Skopeo and zot run
+inside the isolated kind node's network namespace, or its pods. Cosign
+verification runs with Docker `--network none`. No target step downloads
+dependencies after the route is removed.
 
-### What is signed, and why not just trust the bundled key?
+### What is signed
 
-Cosign cannot `sign` an unpushed Skopeo `dir:` image reference. Instead,
-`sign-blob` signs **metadata.json**, whose authenticated file inventory includes
-the image manifest **and every layer/config blob**, the chart archive (including
-its packaged `common` dependency), deployment values and public key. Checking
-only the manifest would not detect tampered layer bytes; the complete inventory
-does. SHA-256 hashes without a verified signature would not establish trust.
+Cosign cannot directly `sign` an unpushed Skopeo `dir:` image. The unchanged
+signing flow uses `cosign sign-blob` on `metadata.json`, whose file inventory
+authenticates **all image manifests, layers/configs, the packaged chart,
+deployment values and public key**. Signing only a manifest would not check
+the transported layer bytes. The full file inventory does.
 
-The public key inside the archive is for portability, **not a trust anchor**.
-An attacker could replace both payload and bundled key. Verification therefore
-requires `--trusted-key /trusted/cosign.pub`, supplied outside the archive.
-The wrapper uses the original build-side key file to model independent delivery.
-For a real transfer, enroll that key or check its fingerprint through a separate
-authenticated channel **before** receiving the archive.
+The bundled public key is portable, **not a trust anchor**: an attacker could
+replace both payload and key. `--trusted-key` must come from an independent,
+authenticated channel. The wrapper models this with the original build-side
+public key, outside the archive.
 
-The deployed image is addressed by the authenticated **digest**, not a mutable
-`latest` tag. Import also checks that zot preserved the exact manifest digest.
-This prevents a registry tag change from silently changing the deployed content.
+The build selects a version tag but records the **resolved linux/amd64 manifest
+digest**. Offline import preserves and checks that digest. Helm deploys
+`localhost:5001/postgres@sha256:...`, not the tag; changing a registry tag cannot
+silently change the deployed bytes. The digest takes precedence over
+`image.tag` in the chart.
 
 ## Prerequisites and assumptions
 
-- **Native Linux amd64** host, a Linux amd64 Docker engine with working kind
-  support, Docker access without sudo, and at least **4 CPUs, 6 GiB available RAM
-  and 6 GiB free disk space**. kind uses a privileged disposable node container.
-- Bash 4+, GNU `tar`, coreutils (`timeout`, `sha256sum`, `sort`, `stat`,
-  `realpath`, etc.), `jq`, `awk`, `grep`.
-- Host **Helm 3.12+ or Helm 4** and **kind v0.31.0**. Helm must be a native,
-  standalone Linux amd64 executable, not a shell/snap wrapper: preparation copies
-  it into the target. kubectl is supplied by the kind node image.
-- Port **127.0.0.1:5001** free. kind also allocates a loopback API server port.
-  Do not run concurrent copies; the resource names are reserved for this demo.
-- Initial connected-side access to Docker Hub/Bitnami OCI, GHCR and Quay.
-  Anonymous Docker Hub requests must not be rate-limited.
-- No proxy inside the kind node or its tools; no existing process acting as an
-  internet proxy on the demo network. This is route-based outage simulation,
-  not a hostile multi-tenant or hardware-enforced air gap.
-- Docker, kind, Helm, the base OS and pre-staged tool images are part of the
-  trusted computing base. The application signature does not attest these tools.
+- Native **Linux amd64**, Docker access without sudo and privileged kind support;
+  at least 4 CPUs, 6 GiB available RAM and 6 GiB free disk.
+- Bash 4+, GNU tar/coreutils (timeout, sha256sum, sort, stat, realpath), jq,
+  awk and grep.
+- Native standalone Linux amd64 **Helm 3.12+ or 4**, and **kind v0.31.0**.
+  Preparation copies Helm into the target; kubectl comes from the node image.
+- Free **127.0.0.1:5001**, plus an automatically allocated loopback Kubernetes
+  API port. Do not run concurrent copies of this demo.
+- Connected-side Docker Hub, GHCR and Quay access, without registry rate limits.
+  No chart repository is needed: our chart has no dependencies.
+- The target has a working **default StorageClass**; kind provides `standard`
+  and its local-path helper image. Preparation waits for the provisioner.
+- No internet proxy in the node or another process proxying internet access
+  on the demo network. This is a route-based outage simulation, not a hostile
+  multi-tenant or physically enforced air gap.
 
-Pinned tool images (Skopeo and Cosign **need not be installed on the host**):
-
-| Tool | Image |
-| --- | --- |
-| Skopeo | `quay.io/skopeo/stable:v1.20.0` |
-| Cosign | `ghcr.io/sigstore/cosign/cosign:v2.4.3` |
-| zot | `ghcr.io/project-zot/zot-linux-amd64:v2.1.15` |
-| Kubernetes | `kindest/node:v1.35.0` |
-| Helm chart | `oci://registry-1.docker.io/bitnamicharts/nginx:22.0.11` |
-
-These are version tags, not immutable tool-image pins. For production, pin
-verified tool digests and attest your bootstrap environment too.
+Skopeo and Cosign run as pinned containers, so neither needs a host install.
+Tool image tags are version pins, not immutable digest/authenticity guarantees.
+Docker, the node image and local tools remain part of the trusted computing base.
 
 ## One command, one terminal
 
-From the **demo-bundle directory**:
+From the repository root:
 
 ```bash
 cd demo-bundle
-./run-demo.sh
-```
-
-To first demonstrate tamper rejection and then deploy the untouched bundle:
-
-```bash
 ./run-demo.sh --tamper
 ```
 
-Each phase clears the interactive terminal and prints a banner. Press Enter at
-phase boundaries so the audience can read the evidence before the next clear.
-No second terminal, manual internet toggle, port-forward, or existing Kubernetes
-context is needed. The wrapper cleans up its cluster, registry and storage on
-success, failure, Ctrl-C or termination.
-
-For a timed, unattended rehearsal:
+Omit `--tamper` for the positive path only. Interactive phases use `clear`,
+banners and Enter pauses; the wrapper removes its target on success, failure,
+Ctrl-C or termination. No second terminal, port-forward or manual network
+toggle is needed. For an unattended rehearsal:
 
 ```bash
 time DEMO_AUTO_ADVANCE=1 ./run-demo.sh --tamper
 ```
 
-The wrapper enforces a **six-minute total elapsed-time budget including cleanup**.
-Presenter pauses count toward it. Tool-image downloads and initial kind node
-extraction are the variable costs: pre-stage the images before the talk:
+The wrapper enforces **under six minutes including cleanup**. Presenter pauses
+count. Pre-stage infrastructure images before the talk:
 
 ```bash
 docker pull quay.io/skopeo/stable:v1.20.0
@@ -143,260 +119,196 @@ docker pull ghcr.io/project-zot/zot-linux-amd64:v2.1.15
 docker pull kindest/node:v1.35.0
 ```
 
-## Walk through the phases manually
+## Step-by-step: CONNECTED
 
-These commands all run in the **same terminal** and leave the target alive
-until explicit cleanup:
+Run these from this directory, in the same terminal.
 
-```bash
-cd demo-bundle
-./scripts/build-bundle.sh
-./scripts/prepare-target.sh
-./scripts/verify-import.sh --trusted-key "$PWD/keys/cosign.pub"
-./scripts/cleanup.sh
-```
-
-### 1. Connected build: download, inventory, sign, archive
+### 1. Package, capture, inventory and sign
 
 ```bash
 ./scripts/build-bundle.sh
 ```
 
-The first run creates `keys/cosign.key`, `keys/cosign.pub` and a randomly
-generated `keys/password`. The key directory is private, generated files are
-gitignored, and the password/private key are **never added to the archive**.
-Subsequent builds reuse this temporary demo identity and verify the keypair
-matches; they do not silently rotate the trust anchor.
-
-The equivalent download/signing operations are:
+Equivalent application operations (the script containerizes Skopeo/Cosign):
 
 ```bash
-helm pull oci://registry-1.docker.io/bitnamicharts/nginx --version 22.0.11
+helm lint chart -f values.yaml --strict
+helm package chart --destination charts
 skopeo copy --override-os linux --override-arch amd64 \
-  docker://docker.io/nginx:latest dir:images/nginx
+  docker://docker.io/library/postgres:18.6-alpine3.23 dir:images/postgres
 cosign sign-blob --yes --tlog-upload=false --key keys/cosign.key \
   --output-signature metadata.sig metadata.json
 ```
 
-The scripts run Cosign/Skopeo in containers, so no host install is required.
-Signing also runs with no network. The random key password is passed through
-the environment, not printed or put in the command line.
-
-Archive layout:
+`helm package`, **not `helm pull`**, produces `offline-postgresql-0.1.0.tgz`.
+The script constructs and signs the SHA-256 inventory before archiving:
 
 ```text
 bundle.tar.gz
-  charts/nginx-22.0.11.tgz       # includes the common chart dependency
-  images/nginx/manifest.json
-  images/nginx/<config/layer blobs>
-  images/nginx/version
-  keys/cosign.pub               # public key ONLY
-  values.yaml                  # official-image compatibility settings
-  metadata.json                # source, platform, resolved digest, file hashes
-  metadata.sig                 # detached signature of metadata.json
+  charts/offline-postgresql-0.1.0.tgz
+  images/postgres/{manifest.json,version,<config-and-layer-blobs>}
+  keys/cosign.pub
+  values.yaml
+  metadata.json
+  metadata.sig
 ```
 
-Expected (image digests vary as `latest` changes):
+The first build generates `keys/cosign.key`, `keys/cosign.pub` and
+`keys/password` under a private, ignored directory. Subsequent builds reuse and
+validate that keypair, not silently rotate it. **The private key and password
+are never transported.** Database credentials are not in the bundle either.
+
+Expected:
 
 ```text
-1 / CONNECTED: pull chart and image; sign the complete inventory
-Pulled: registry-1.docker.io/bitnamicharts/nginx:22.0.11
-Copying blob sha256:...
+1 / CONNECTED: package our chart, pull PostgreSQL, sign the complete inventory
+1 chart(s) linted, 0 chart(s) failed
+Successfully packaged chart ...
 Wrote signature to file /bundle/metadata.sig
 BUNDLE: .../demo-bundle/bundle.tar.gz
 TRUST OUT OF BAND: copy keys/cosign.pub separately to the target.
 ```
 
-Use `tar -tzf bundle.tar.gz` to inspect the transport contents. To take it to a
-separate, already-prepared offline host, transfer this archive and the demo
-scripts/configurations, but **do not copy the private key/password**. Deliver
-the trusted public key independently. This is an **application bundle**, not a
-bootable OS/Kubernetes distribution; the target's tooling/Kubernetes must
-already be provisioned, as with a real managed air-gapped cluster.
+The tested archive is approximately **113 MiB**, with 15 authenticated files.
+Digest values depend on captured bytes; do not copy a digest from these docs.
 
-### 2. Pre-provision infrastructure, then declare the target offline
+### 2. Pre-provision infrastructure, then remove internet access
 
 ```bash
 ./scripts/prepare-target.sh
 ```
 
-This is infrastructure preparation, **not part of offline verification**:
-
-- Preload missing tool/node images while connected.
-- Create a single-node kind cluster on its own Docker network using only the
-  local node image. kind's packaged control-plane, CNI, DNS, pause and storage
-  images supply Kubernetes' bootstrap dependencies.
-- Copy the host Helm executable into the target.
-- Remove the node's default IPv4 route; require there is no default IPv6 route.
-  The change is entirely inside the disposable node's namespace:
+This connected infrastructure step stages tools/node images, creates the kind
+node and private kubeconfig, waits for storage, copies Helm, then runs:
 
 ```bash
 docker exec offline-bundle-demo-control-plane ip -4 route del default
 ```
 
-The node keeps its local Docker-network address, so Kubernetes, pod networking
-and the host's loopback management mappings continue working. Unlike attaching
-a different network, this does not invalidate API certificates or node IPs.
-No host routes, firewall rules, daemon configuration or existing kubeconfig
-are changed. A private kubeconfig is stored under the gitignored `.state/`.
-
-Expected:
+Only the disposable node's routes change, not the host's. The script checks
+that **neither IPv4 nor IPv6 has a default route**, and the node has exactly
+its owned Docker network. kind's packaged CNI, DNS, pause and storage images
+are pre-provisioned infrastructure, not transported application dependencies.
 
 ```text
-2 / TARGET: provision Kubernetes, then cut its internet route
 OFFLINE: target has no IPv4/IPv6 default route; host networking is unchanged.
-NAME                                STATUS   ROLES
-offline-bundle-demo-control-plane   Ready    control-plane
-Infrastructure is pre-staged; all following supply-chain steps are offline.
 ```
 
-Do **not** run this preparation step on a genuinely offline host expecting it
-to download dependencies. Pre-provision first, or independently transport the
-tool/node images using `docker save` / `docker load`.
+## Step-by-step: AIR-GAPPED
 
-### 3. Receive, safely extract, authenticate and check every file
+### 3. Receive and authenticate
 
 ```bash
 ./scripts/verify-import.sh --trusted-key "$PWD/keys/cosign.pub"
 ```
 
-The script refuses a target with a default route or unexpected network
-attachment, and refuses missing local tools instead of downloading them.
-
-Before extraction it rejects unsafe archive names, traversal, duplicate
-members, links, device/special files and payloads over **1 GiB**. Extraction
-uses a private temporary directory without restoring archive ownership or
-elevated permissions. Archive scans/extraction also have bounded timeouts. Then:
+A real target receives `bundle.tar.gz` and separately enrolls the trusted key.
+Before extraction, the script rejects traversal, absolute/unsafe names,
+duplicate entries, links, special files and archives expanding beyond **1 GiB**.
+Archive scans/extraction have timeouts and use a private temporary directory.
+Cosign then runs offline with read-only payload/key mounts:
 
 ```bash
 cosign verify-blob --offline --insecure-ignore-tlog \
   --key /trusted/cosign.pub --signature metadata.sig metadata.json
 ```
 
-Verification has **no network** and mounts only the extracted archive and the
-independent public key read-only. The private key/password are not accessible.
-Every payload hash must match, and the signed file set must equal the actual
-file set: missing files and unsigned extras are rejected. Only then can the
-script start the registry, import content or execute Helm templates.
-
-Expected:
+Every file hash and the **exact file set** must match the authenticated inventory,
+including the archived public key matching the independent one. Missing,
+changed and unsigned extra files fail **before registry startup or Helm**.
 
 ```text
-3 / AIR GAP: receive the archive and verify its signed inventory
 Verified OK
 VERIFIED: publisher signature (no network or transparency-log lookup).
 VERIFIED: all chart, values, public-key and image files match the signed inventory.
 ```
 
-Cosign prints a warning about skipping transparency-log verification. This is
-intentional: the key-based demo signs with `--tlog-upload=false` and explicitly
-trusts the enrolled key. It demonstrates authenticity/integrity **without**
-Fulcio, Rekor or OIDC access. It does not provide transparency-log inclusion,
-trusted timestamps, keyless identity verification or offline key revocation.
+Skipping tlog verification is intentional for this key-based demo, which signs
+with `--tlog-upload=false`. It provides publisher-key authenticity and payload
+integrity, not Rekor inclusion, keyless identity, trusted timestamps or offline
+revocation.
 
-### 4. Local registry import, still offline
+### 4. Import only verified bytes
 
-The script starts zot with [registry/config.yml](registry/config.yml), which has
-**no upstream proxy/sync**. zot shares the node's isolated network namespace
-and listens on `localhost:5001`; Skopeo and the node's containerd see exactly
-that same loopback endpoint. kind maps it to host loopback for optional
-inspection. It is not the unrelated `localhost` of a Kubernetes pod.
+The same script starts zot using [registry/config.yml](registry/config.yml)
+with **no upstream sync**. Registry and Skopeo share the node's namespace:
+`localhost:5001` is also the address seen by node containerd, not pod loopback.
 
-A direct Skopeo Docker Hub request must fail with a recognized network error:
-
-```text
-4 / IMPORT: start a local-only zot and load the verified image
-Proving a direct Docker Hub request is impossible from the target...
-... connect: network is unreachable
-```
-
-Authentication failures, rate limits and missing images are not accepted as
-outage proof. The actual offline import is:
+A direct Hub request must fail with a recognized **network** error, not a
+rate-limit/authentication error. Import then reads every blob from disk:
 
 ```bash
 skopeo copy --preserve-digests --dest-tls-verify=false \
-  dir:images/nginx docker://localhost:5001/nginx:latest
+  dir:images/postgres docker://localhost:5001/postgres:18.6-alpine3.23
 ```
-
-Every blob comes from the bundle, not a remote registry or daemon image store.
-The imported raw manifest must still hash to the authenticated image digest.
 
 ```text
-IMPORTED: localhost:5001/nginx:latest (sha256:...)
+Proving a direct Docker Hub request is impossible from the target...
+... connect: network is unreachable
+IMPORTED: localhost:5001/postgres:18.6-alpine3.23 (sha256:...)
 ```
 
-### 5. Helm deployment and an HTTP response
+### 5. Deploy, bind storage and authenticate to PostgreSQL
 
-The chart and values are copied into the isolated node. Helm runs there using
-the node's kubeconfig:
+The script creates `offline-bundle` and a random target-side
+`offline-postgresql-auth` Secret **before Helm**. It never packages credentials
+or prints the password. An existing Secret is reused on upgrades: initializing
+a PVC once means changing the environment password later does not rotate the
+database password. If a PVC exists but its Secret is missing, restore the
+original Secret rather than generating incompatible credentials.
+
+Equivalent operations (inside the target, after transport):
 
 ```bash
-helm upgrade --install offline-nginx /offline-bundle/nginx.tgz \
+kubectl -n offline-bundle create secret generic offline-postgresql-auth \
+  --from-file=password=/path/to/private/password
+helm upgrade --install offline-postgresql /offline-bundle/postgresql.tgz \
   --namespace offline-bundle --create-namespace \
   -f /offline-bundle/values.yaml \
   --set image.registry=localhost:5001 \
   --set image.digest=sha256:<authenticated-manifest-digest> \
   --wait --timeout 90s
-kubectl -n offline-bundle get pods -o wide
-kubectl -n offline-bundle exec deployment/offline-nginx -- \
-  curl -fsS http://127.0.0.1:8080/
+kubectl -n offline-bundle get pods,pvc
+kubectl -n offline-bundle exec statefulset/offline-postgresql -- sh -ec '
+  export PGPASSWORD="$POSTGRES_PASSWORD" PGCONNECT_TIMEOUT=5
+  psql --host=127.0.0.1 --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
+    --no-password --set=ON_ERROR_STOP=1 --tuples-only --no-align \
+    --command="SELECT current_database(), current_user, 1;"
+'
 ```
 
-The first deployment uses a fresh kind node with **no preloaded nginx image**;
-containerd must pull it from zot. `imagePullPolicy: Always` also requires the
-registry on repeats, although existing layers can then be reused. The script
-checks the actual Deployment image digest, available replica, HTTP welcome
-page and continued absence of a default route.
+The chart exposes `image.registry`, `image.repository`, `image.tag` and
+`image.digest`. Defaults use Docker Hub `library/postgres`; the signed
+[deployment values](values.yaml) select repository `postgres` in local zot.
+The verifier supplies the authenticated digest. `Always` pull policy requires
+the local registry even on repeats.
+
+The StatefulSet has one replica and a 1 GiB RWO claim. **No `storageClassName`
+is set**, so the default class provisions it. PostgreSQL 18 data lives at
+`/var/lib/postgresql/18/docker`, with the PVC mounted at `/var/lib/postgresql`.
+UID/GID **70** matches the official **Alpine** image, capabilities are dropped,
+and service-account token mounting is disabled. Changing to Debian images or
+another major version needs deliberate UID/data-layout and migration changes.
+
+Startup/readiness probes use `pg_isready`. This alone does **not** prove valid
+credentials: the script also requires a TCP `psql` query using the existing
+Secret. Initialization explicitly uses **SCRAM-SHA-256** host authentication.
+This demo's bootstrap user is a database superuser; production applications
+need separate least-privilege roles, backups, TLS and managed secret lifecycle.
+
+Expected:
 
 ```text
-5 / DEPLOY: local Helm chart, verified digest, no external pulls
-NAME                            READY   STATUS    RESTARTS
-offline-nginx-...                1/1     Running   0
+offline-postgresql-0        1/1   Running
+data-offline-postgresql-0   Bound ... 1Gi RWO standard
+SQL: demo|demo|1
 PASS: signature, every payload hash and imported image digest verified offline.
-PASS: Helm deployed the official nginx image by authenticated digest; pod is Ready.
-PASS: HTTP returned Welcome to nginx!; target still has no default route.
+PASS: Helm deployed official PostgreSQL by authenticated digest; pod is Running/Ready, PVC Bound.
+PASS: psql authenticated over TCP using the existing Secret; SQL returned demo|demo|1.
+PASS: target still has no IPv4/IPv6 default route.
 ```
 
-**Chart compatibility matters:** `bitnami/nginx` expects Bitnami paths, its
-entrypoint and a Bitnami-specific log-preservation init container. Merely
-overriding the registry does not work with Docker Hub's official nginx image.
-The authenticated [values.yaml](values.yaml) disables that default init
-container, bypasses the Bitnami entrypoint and supplies a minimal nginx config.
-nginx runs as UID/GID **101**, listens on **8080**, writes temporary state only
-to `/tmp`, keeps a **read-only root filesystem** and drops capabilities.
-
-`global.security.allowInsecureImages=true` disables the chart's vendor-image
-allowlist, **not** our cryptographic verification. Helm prints a substitution
-warning as expected. Optional Git-cloning and metrics containers stay disabled,
-so there are no extra application images or chart dependencies to fetch.
-This compatibility override is a demonstration, not a general replacement for
-all of the vendor chart's features.
-
-### 6. Cleanup and repeatability
-
-The wrapper automatically runs:
-
-```bash
-./scripts/cleanup.sh
-```
-
-Manual cleanup is safe to repeat. Registry/container/volume/network ownership
-is checked before removal, and the cluster's container ID must match the
-locally recorded demo identity. Unrelated projects are not touched.
-
-The bundle, temporary signing identity and preloaded tool images are retained.
-Everything generated is gitignored. To discard the demo identity after the
-talk, first clean up, then delete only these named local files:
-
-```bash
-rm -f keys/cosign.key keys/cosign.pub keys/password
-```
-
-The next build generates a new identity; previously enrolled keys must be
-updated deliberately. Do not use this local demo key/password pattern for
-production signing; use managed keys or hardware-backed signing.
-
-## Negative test: tampered image
+## Tampering
 
 With a prepared target:
 
@@ -404,96 +316,116 @@ With a prepared target:
 ./scripts/verify-import.sh --trusted-key "$PWD/keys/cosign.pub" --tamper
 ```
 
-This modifies only the **temporary extracted image manifest**, not the signed
-inventory, original bundle, source image or key. The publisher's inventory
-signature is still valid, but the image file hash no longer matches it:
+This changes only the extracted image manifest, not the archive or inventory.
+The inventory signature remains valid, but the file check returns **42**:
 
 ```text
-Verified OK
 TAMPER: modifying the transported image manifest, not the original archive.
-REJECTED: authenticated SHA-256 mismatch: images/nginx/manifest.json
+REJECTED: authenticated SHA-256 mismatch: images/postgres/manifest.json
 ```
 
-The command returns **42** before registry import or deployment. That is an
-expected negative test, not a successful install. Altering a layer, chart or
-deployment values is rejected by the same check. Altering the inventory itself
-fails Cosign verification. Using a different key fails authentication.
+The wrapper's `--tamper` path requires exactly 42, then deploys the unchanged
+bundle. A generic failure is never reported as successful tamper detection.
+Changes to layers, chart or values are protected by the same inventory.
 
-`./run-demo.sh --tamper` expects exactly exit 42 for this test, then runs
-verification/import/deployment against the unchanged archive. Any other
-failure is surfaced rather than misreported as detected tampering.
+## Cleanup and repeatability
 
-## Security scope
+The wrapper cleans automatically. Manual phase runs leave the target alive:
 
-- The signature authenticates **this publisher's captured bytes**, not the
-  upstream publisher's identity or the absence of vulnerabilities. No upstream
-  provenance, SBOM analysis or malware scanning is claimed.
-- Hashes and the manifest digest prevent payload/tag substitution. They do not
-  stop replay of an older correctly signed bundle; real environments also need
-  version policy, trusted time, key rotation and revocation procedures.
-- This is **verify-before-import**, not Kubernetes admission enforcement.
-  Registry-native signatures are not pushed, and no admission controller
-  automatically verifies future workloads. The script's verified digest is
-  the deployment trust boundary.
-- Registry HTTP without auth is deliberate for an isolated, short-lived demo.
-  Host exposure is loopback-only, but peers on the Docker network can reach
-  it. Production needs TLS, authentication, restricted writes and access policy.
-- Route removal proves an ordinary target process cannot reach internet
-  addresses; Docker DNS can still resolve names through the host. Privileged
-  host/container administrators could restore routes or proxy traffic.
-  The default-route and direct-request checks are evidence of the simulated
-  outage, not a claim of a hardware-enforced physical air gap.
+```bash
+./scripts/build-bundle.sh
+./scripts/prepare-target.sh
+./scripts/verify-import.sh --trusted-key "$PWD/keys/cosign.pub"
+./scripts/verify-import.sh --trusted-key "$PWD/keys/cosign.pub" # upgrade, same Secret/PVC
+./scripts/cleanup.sh
+./scripts/cleanup.sh
+```
 
-## Validation and troubleshooting
+Cleanup checks ownership and removes only this cluster, registry, registry
+volume and Docker network. **The database data is disposable and is destroyed
+with the kind node**; a PVC is persistence across pod restarts, not a backup.
+The bundle, keys and preloaded tool images remain locally and gitignored.
+After cleanup, optionally remove only the generated signing identity:
 
-From the demo-bundle directory:
+```bash
+rm -f keys/cosign.key keys/cosign.pub keys/password
+```
+
+The next build generates a new identity, requiring deliberate trust re-enrollment.
+Do not use this local-key/password pattern for production signing.
+
+## Where network is still required / security limits
+
+- Build-time image/tool downloads and connected infrastructure bootstrap require
+  internet. On a truly offline host, independently transport and trust tool/node
+  images with `docker save` / `docker load`; do not run preparation expecting
+  missing images to download.
+- The host remains online. Route removal blocks ordinary external IP access
+  from the target, but Docker DNS can still resolve via the host, local peers
+  remain reachable, and a privileged administrator could restore a route or
+  install a proxy. This is not a zero-packet or physical air-gap claim.
+- Registry HTTP without auth is for this short-lived demo. Host publication is
+  loopback-only; Docker-network peers can still reach it. Production requires
+  TLS, authentication and restricted writes.
+- The signature authenticates this publisher's captured bytes, not upstream
+  provenance, vulnerability freedom or freshness. No SBOM/scanning, replay
+  prevention or Kubernetes admission enforcement is claimed. Future deployments
+  do not automatically inherit this script's verify-before-import policy.
+
+## Troubleshooting and validation
 
 ```bash
 for script in run-demo.sh scripts/*.sh; do bash -n "$script"; done
-shellcheck -x -P scripts run-demo.sh scripts/*.sh
+shellcheck -x -P scripts:. run-demo.sh scripts/*.sh
+helm lint chart -f values.yaml --strict
 DEMO_AUTO_ADVANCE=1 ./run-demo.sh --tamper
 ```
 
-To inspect a manual run while it is still alive:
+- **Chart requires a Secret:** set `auth.existingSecret` when using the chart
+  directly; it intentionally does not create or embed a password.
+- **PVC Pending:** check the default StorageClass, provisioner, helper image and
+  node disk pressure. Helm failures print pods, PVCs and events. Do not enable
+  internet to compensate for missing pre-staged infrastructure.
+- **Password authentication failed on an existing PVC:** restore its original
+  Secret; changing `POSTGRES_PASSWORD` is not a database password migration.
+- **ImagePullBackOff:** check zot logs and the authenticated digest; pod loopback
+  is not the registry endpoint used by node containerd.
+- **Port conflict, kind/bootstrap failure:** free port 5001 and check Docker,
+  RAM/disk and privileged-container support. A Hub 429 is a connected failure.
+- **Signature/archive failure:** re-transfer and verify the independent key,
+  never bypass checks. Ownership mismatches require investigation.
+- **Uncatchable interruption:** run cleanup explicitly.
 
-```bash
-docker exec offline-bundle-demo-control-plane ip route
-docker exec offline-bundle-demo-control-plane kubectl \
-  --kubeconfig /etc/kubernetes/admin.conf -n offline-bundle get pods -o wide
-docker logs --tail 30 offline-bundle-registry
-```
+## Tested with
 
-For a Helm failure the script prints pods and Kubernetes events. Check port
-5001 conflicts, available RAM/disk and kind compatibility. Docker Hub `429`
-errors are connected-side rate limiting, not successful offline verification.
-If interrupted with an uncatchable signal, run cleanup manually. A target
-ownership mismatch requires investigation, not deleting an unrelated cluster.
-For archive/key failures, re-transfer the signed archive and confirm the
-independent trust anchor; **never skip verification to make deployment pass**.
+Test date: **2026-10-16**, native Linux amd64:
 
-### Recorded end-to-end results
-
-Tested on 2026-10-16: Linux amd64, Docker 29.9.0, kind v0.31.0, Helm v4.3.0,
-Kubernetes v1.35.0 and the pinned tools/chart above.
-
-| Check | Result |
+| Component | Exact version |
 | --- | --- |
-| Single-command build, negative test, isolated import, Helm deploy, cleanup | **39 seconds**, with tool/node images preloaded |
-| Target direct Docker Hub access | Rejected with `network is unreachable` |
-| Tampered transported image manifest | Rejected with exit 42, before import |
-| Tampered layer, chart archive or deployment values | Each rejected with exit 42 |
-| Altered signed inventory or different valid signing key | Cosign rejected authentication |
-| Unsigned extra file, archive symlink or path traversal | Each rejected before registry startup |
-| Private signing key and password | Absent from transport archive; gitignored |
-| Inventory signature and all image/chart/value hashes | Verified with network disabled for Cosign |
-| Imported manifest digest | Identical to authenticated bundle digest |
-| Fresh-node Helm deployment | **1/1 Running**, official nginx image by digest |
-| Application response | `Welcome to nginx!` |
-| Target network after deployment | No default IPv4 or IPv6 route |
-| Repeated preparation, import and Helm upgrade | Passed while target remained isolated |
-| Wrapper in a real pseudo-terminal, including clears and banners | Passed; **39 seconds** including cleanup |
-| Shell syntax and ShellCheck | Passed |
+| Docker engine | 29.9.1 |
+| kind / Kubernetes node | v0.31.0 / kindest/node:v1.35.0 |
+| Helm | v4.3.0 |
+| Skopeo | quay.io/skopeo/stable:v1.20.0 |
+| Cosign | ghcr.io/sigstore/cosign/cosign:v2.4.3 |
+| zot | ghcr.io/project-zot/zot-linux-amd64:v2.1.15 |
+| Official PostgreSQL | docker.io/library/postgres:18.6-alpine3.23 |
+| Self-authored chart | offline-postgresql 0.1.0 |
 
-The six-minute target assumes pre-staged infrastructure images, a working kind
-host and normal connected-side chart/image download bandwidth. Cold tool
-downloads or presenter pauses can exceed it; rehearse on the talk machine.
+**Full fresh run: 59 seconds**, including connected packaging/image capture,
+tamper rejection, isolated import, Running/Ready pod, Bound PVC, authenticated
+TCP SQL query and cleanup, with tool/node images preloaded. Cold downloads and
+presenter pauses vary; rehearse on the talk machine.
+
+Additional checks passed:
+
+- **6-second repeat** of preparation, verified import and Helm upgrade, retaining
+  the same Secret, PVC and database contents.
+- SQL data survived deletion and offline replacement of the database pod.
+- A deliberately wrong TCP password was rejected.
+- Modified image manifest/blob, chart and values were rejected with exit 42;
+  modified inventory failed Cosign verification.
+- Private credentials were absent from the archive.
+- Bash syntax, ShellCheck and Helm lint passed. Render checks confirmed digest
+  precedence, default-StorageClass behavior, and rejection of a missing Secret
+  name or malformed digest.
+- Cleanup left no demo target containers; repeat cleanup succeeded.

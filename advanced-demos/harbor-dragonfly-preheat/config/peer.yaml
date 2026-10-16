@@ -1,0 +1,56 @@
+aliveTime: 0s
+keepStorage: true
+scheduler:
+  manager:
+    enable: false
+  netAddrs:
+    - type: tcp
+      addr: scheduler:8002
+  scheduleTimeout: 60s
+  disableAutoBackSource: true
+download:
+  calculateDigest: true
+  totalRateLimit: 1024Mi
+  perPeerRateLimit: 512Mi
+  pieceDownloadTimeout: 60s
+  downloadGRPC:
+    security:
+      insecure: true
+    unixListen:
+      socket: /var/run/dragonfly/dfdaemon.sock
+  peerGRPC:
+    security:
+      insecure: true
+    tcpListen:
+      port: 65000
+upload:
+  rateLimit: 1024Mi
+  security:
+    insecure: true
+  tcpListen:
+    port: 65002
+storage:
+  taskExpireTime: 24h
+  diskGCThreshold: 1Gi
+  diskGCThresholdPercent: 99
+  multiplex: true
+proxy:
+  defaultFilter: "Expires&Signature&ns"
+  security:
+    insecure: true
+  tcpListen:
+    port: 65001
+  proxies:
+    - regx: blobs/sha256.*
+  whiteList:
+    - host: harbor
+      regx: ".*"
+      ports: [8080]
+health:
+  security:
+    insecure: true
+  tcpListen:
+    port: 40901
+metrics: ":8000"
+console: true
+verbose: true

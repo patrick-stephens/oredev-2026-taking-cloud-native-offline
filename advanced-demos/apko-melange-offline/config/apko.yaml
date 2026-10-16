@@ -1,0 +1,25 @@
+contents:
+  repositories:
+    - "@demo /tmp/work/artifacts/apk-repo/melange"
+  keyring:
+    - /tmp/work/.state/offline-demo.rsa.pub
+  packages:
+    - offline-go-server@demo
+
+archs:
+  - amd64
+
+entrypoint:
+  command: /usr/bin/offline-go-server
+
+accounts:
+  groups:
+    - groupname: offline-go-server
+      gid: 65532
+  users:
+    - username: offline-go-server
+      uid: 65532
+      gid: 65532
+      shell: /sbin/nologin
+      homedir: /nonexistent
+  run-as: 65532

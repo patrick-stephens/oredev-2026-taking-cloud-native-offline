@@ -23,6 +23,10 @@ if ! kind get clusters | grep -Fxq "$CLUSTER"; then
 fi
 assert_target_owned
 docker cp "$(realpath "$(command -v helm)")" "$NODE:/usr/local/bin/offline-demo-helm"
+kube -n local-path-storage rollout status deployment/local-path-provisioner --timeout=60s
+kube get storageclasses -o json | jq -e '
+    any(.items[]; .metadata.annotations["storageclass.kubernetes.io/is-default-class"] == "true")
+' >/dev/null || die "PostgreSQL needs a default StorageClass."
 docker exec "$NODE" sh -ec 'if [ -n "$(ip -4 route show default)" ]; then ip -4 route del default; fi'
 assert_offline
 printf 'OFFLINE: target has no IPv4/IPv6 default route; host networking is unchanged.\n'

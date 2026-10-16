@@ -1,0 +1,24 @@
+services:
+  registry:
+    image: registry:2.8.3
+    restart: unless-stopped
+    ports:
+      - "192.168.56.1:5000:5000"
+    volumes:
+      - ../.state/registry:/var/lib/registry
+    networks:
+      - artifacts
+
+  files:
+    image: nginx:1.27.5-alpine
+    restart: unless-stopped
+    ports:
+      - "192.168.56.1:8080:80"
+    volumes:
+      - ../.state/files:/usr/share/nginx/html:ro
+    networks:
+      - artifacts
+
+networks:
+  artifacts:
+    internal: true

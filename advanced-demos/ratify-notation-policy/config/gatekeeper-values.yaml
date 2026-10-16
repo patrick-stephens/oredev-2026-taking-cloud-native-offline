@@ -1,0 +1,15 @@
+replicas: 1
+enableExternalData: true
+enableMutation: true
+validatingWebhookFailurePolicy: Fail
+mutatingWebhookFailurePolicy: Fail
+validatingWebhookMatchConditions:
+  - name: demo-namespace
+    expression: "has(request.namespace) && request.namespace == 'offline-demo'"
+mutatingWebhookMatchConditions:
+  - name: demo-namespace
+    expression: "has(request.namespace) && request.namespace == 'offline-demo'"
+validatingWebhookTimeoutSeconds: 15
+mutatingWebhookTimeoutSeconds: 15
+externaldataProviderResponseCacheTTL: 0s
+auditInterval: 0

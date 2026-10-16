@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: podinfo-before
+  namespace: default
+spec:
+  restartPolicy: Never
+  containers:
+    - name: podinfo
+      image: ghcr.io/stefanprodan/podinfo:6.15.0
+      # Prove the unmodified reference without preloading the workload image.
+      imagePullPolicy: Never

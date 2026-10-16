@@ -1,0 +1,6 @@
+apiVersion: v2
+name: offline-postgresql
+description: A minimal official PostgreSQL image chart for the signed offline bundle demo
+type: application
+version: 0.1.0
+appVersion: "18.6"

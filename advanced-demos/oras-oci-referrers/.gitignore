@@ -1,0 +1,6 @@
+.state/
+keys/
+*.key
+*.pem
+*.crt
+*.p12

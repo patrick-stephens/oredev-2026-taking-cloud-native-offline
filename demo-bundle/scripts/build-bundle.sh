@@ -2,20 +2,21 @@
 # Connected side, from demo-bundle: ./scripts/build-bundle.sh
 # Equivalent image operation (containerized Skopeo below):
 # skopeo copy --override-os linux --override-arch amd64 \
-#   docker://docker.io/nginx:latest dir:images/nginx
-# helm pull oci://registry-1.docker.io/bitnamicharts/nginx --version 22.0.11
+#   docker://docker.io/library/postgres:18.6-alpine3.23 dir:images/postgres
+# helm lint chart --set auth.existingSecret=offline-postgresql-auth
+# helm package chart --destination charts
 # cosign sign-blob --tlog-upload=false --key keys/cosign.key \
 #   --output-signature metadata.sig metadata.json
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
-banner "1 / CONNECTED: pull chart and image; sign the complete inventory"
+banner "1 / CONNECTED: package our chart, pull PostgreSQL, sign the complete inventory"
 require_tools
 ensure_image "$SKOPEO"
 ensure_image "$COSIGN"
 umask 077
 work="$(mktemp -d "$DEMO_DIR/.build.XXXXXXXX")"
 trap 'remove_workdir "$work"' EXIT
-mkdir -p "$DEMO_DIR/keys" "$work/charts" "$work/images/nginx" "$work/keys"
+mkdir -p "$DEMO_DIR/keys" "$work/charts" "$work/images/postgres" "$work/keys"
 chmod 700 "$DEMO_DIR/keys"
 
 if [[ ! -e "$DEMO_DIR/keys/cosign.key" && ! -e "$DEMO_DIR/keys/cosign.pub" ]]; then
@@ -33,12 +34,14 @@ cmp "$work/derived.pub" "$DEMO_DIR/keys/cosign.pub" ||
     die "The private and public signing keys do not match."
 cp "$DEMO_DIR/keys/cosign.pub" "$work/keys/cosign.pub"
 
-timeout 60s helm pull oci://registry-1.docker.io/bitnamicharts/nginx \
-    --version "$CHART_VERSION" --destination "$work/charts"
+helm lint "$DEMO_DIR/chart" -f "$DEMO_DIR/values.yaml" --strict
+helm package "$DEMO_DIR/chart" --destination "$work/charts"
+[[ -s "$work/charts/offline-postgresql-$CHART_VERSION.tgz" ]] ||
+    die "Packaged chart version differs from the demo's pinned version."
 timeout 100s docker run --rm --user "$(id -u):$(id -g)" \
     --mount "type=bind,src=$work,dst=/bundle" "$SKOPEO" \
     --command-timeout 90s copy --override-os linux --override-arch amd64 \
-    docker://docker.io/nginx:latest dir:/bundle/images/nginx
+    "docker://$POSTGRES_IMAGE" dir:/bundle/images/postgres
 cp "$DEMO_DIR/values.yaml" "$work/values.yaml"
 
 # Authenticate every chart dependency, image layer, config, manifest and values.
@@ -51,12 +54,13 @@ cp "$DEMO_DIR/values.yaml" "$work/values.yaml"
             jq -n --arg path "$file" --arg sha256 "${digest%% *}" \
                 '{path:$path,sha256:$sha256}'
         done | jq -s . > files.json
-    digest="$(sha256sum images/nginx/manifest.json)"
+    digest="$(sha256sum images/postgres/manifest.json)"
     jq -n --arg digest "sha256:${digest%% *}" --arg version "$CHART_VERSION" \
+        --arg image "$POSTGRES_IMAGE" \
         --slurpfile files files.json \
         '{schemaVersion:1,platform:"linux/amd64",
-          image:{reference:"docker.io/library/nginx:latest",digest:$digest},
-          chart:{name:"nginx",version:$version},files:$files[0]}' > metadata.json
+          image:{reference:$image,digest:$digest},
+          chart:{name:"offline-postgresql",version:$version},files:$files[0]}' > metadata.json
 )
 signing_tool "$work" sign-blob --yes --tlog-upload=false --key /keys/cosign.key \
     --output-signature /bundle/metadata.sig /bundle/metadata.json

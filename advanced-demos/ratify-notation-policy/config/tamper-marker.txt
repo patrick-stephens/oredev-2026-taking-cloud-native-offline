@@ -1,0 +1,1 @@
+This extra layer was added after the original digest was signed.

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "offline-demo-policy",
+  "purpose": "Illustrative metadata, not an enforced admission policy",
+  "rules": {
+    "requireSBOM": true,
+    "requireDigestPinnedDeployment": true,
+    "allowExternalModelDownloads": false
+  }
+}

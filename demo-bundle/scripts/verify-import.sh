@@ -4,8 +4,10 @@
 # cosign verify-blob --offline --insecure-ignore-tlog --key /trusted/cosign.pub \
 #   --signature metadata.sig metadata.json
 # skopeo copy --preserve-digests --dest-tls-verify=false \
-#   dir:images/nginx docker://localhost:5001/nginx:latest
-# helm upgrade --install offline-nginx charts/nginx-22.0.11.tgz \
+#   dir:images/postgres docker://localhost:5001/postgres:18.6-alpine3.23
+# kubectl -n offline-bundle create secret generic offline-postgresql-auth \
+#   --from-file=password=/path/to/private/password
+# helm upgrade --install offline-postgresql charts/offline-postgresql-0.1.0.tgz \
 #   --namespace offline-bundle --create-namespace -f values.yaml \
 #   --set image.registry=localhost:5001 --set image.digest=sha256:... --wait
 set -euo pipefail
@@ -61,11 +63,11 @@ cmp "$trusted_key" "$payload/keys/cosign.pub" ||
     die "Bundled public key differs from the independently trusted key."
 printf 'VERIFIED: publisher signature (no network or transparency-log lookup).\n'
 
-jq -e --arg version "$CHART_VERSION" '
+jq -e --arg version "$CHART_VERSION" --arg image "$POSTGRES_IMAGE" '
     .schemaVersion == 1 and .platform == "linux/amd64" and
-    .image.reference == "docker.io/library/nginx:latest" and
+    .image.reference == $image and
     (.image.digest | test("^sha256:[a-f0-9]{64}$")) and
-    .chart.name == "nginx" and .chart.version == $version and
+    .chart.name == "offline-postgresql" and .chart.version == $version and
     (.files|type == "array" and length > 0) and
     all(.files[]; (.path|test("^(charts/|images/|keys/|values.yaml$)")) and
         (.path|test("^[a-zA-Z0-9_./-]+$")) and
@@ -76,7 +78,7 @@ jq -e --arg version "$CHART_VERSION" '
 
 if [[ "$tamper" == true ]]; then
     printf 'TAMPER: modifying the transported image manifest, not the original archive.\n'
-    printf '\nmalicious-change\n' >> "$payload/images/nginx/manifest.json"
+    printf '\nmalicious-change\n' >> "$payload/images/postgres/manifest.json"
 fi
 while IFS=$'\t' read -r path expected; do
     [[ -f "$payload/$path" ]] || die "Missing authenticated file: $path"
@@ -94,7 +96,7 @@ jq -r '.files[].path' "$payload/metadata.json" | sort > "$work/signed-files"
 cmp "$work/actual-files" "$work/signed-files" ||
     die "Payload has unsigned, missing or duplicate files."
 digest="$(jq -r '.image.digest' "$payload/metadata.json")"
-actual="$(sha256sum "$payload/images/nginx/manifest.json")"
+actual="$(sha256sum "$payload/images/postgres/manifest.json")"
 [[ "$digest" == "sha256:${actual%% *}" ]] || die "Image digest does not match the authenticated manifest."
 printf 'VERIFIED: all chart, values, public-key and image files match the signed inventory.\n'
 
@@ -129,7 +131,7 @@ fi
 assert_offline
 printf 'Proving a direct Docker Hub request is impossible from the target...\n'
 if failure="$(timeout 20s docker run --rm --network "container:$NODE" "$SKOPEO" \
-    --command-timeout 8s inspect --raw docker://docker.io/nginx:latest 2>&1)"; then
+    --command-timeout 8s inspect --raw "docker://$POSTGRES_IMAGE" 2>&1)"; then
     die "Target unexpectedly reached Docker Hub."
 else
     status=$?
@@ -141,32 +143,66 @@ fi
 timeout 90s docker run --rm --network "container:$NODE" \
     --mount "type=bind,src=$payload,dst=/bundle,readonly" "$SKOPEO" \
     --command-timeout 80s copy --preserve-digests --dest-tls-verify=false \
-    dir:/bundle/images/nginx docker://localhost:5001/nginx:latest
+    dir:/bundle/images/postgres "docker://localhost:5001/postgres:$POSTGRES_TAG"
 imported="$(docker run --rm --network "container:$NODE" "$SKOPEO" \
-    --command-timeout 10s inspect --raw --tls-verify=false docker://localhost:5001/nginx:latest | sha256sum)"
+    --command-timeout 10s inspect --raw --tls-verify=false "docker://localhost:5001/postgres:$POSTGRES_TAG" | sha256sum)"
 [[ "sha256:${imported%% *}" == "$digest" ]] || die "Registry manifest digest differs after import."
-printf 'IMPORTED: localhost:5001/nginx:latest (%s)\n' "$digest"
+printf 'IMPORTED: localhost:5001/postgres:%s (%s)\n' "$POSTGRES_TAG" "$digest"
 
 advance
 banner "5 / DEPLOY: local Helm chart, verified digest, no external pulls"
 docker exec "$NODE" mkdir -p /offline-bundle
-docker cp "$payload/charts/nginx-$CHART_VERSION.tgz" "$NODE:/offline-bundle/nginx.tgz"
+docker cp "$payload/charts/offline-postgresql-$CHART_VERSION.tgz" "$NODE:/offline-bundle/postgresql.tgz"
 docker cp "$payload/values.yaml" "$NODE:/offline-bundle/values.yaml"
-if ! docker exec "$NODE" offline-demo-helm upgrade --install offline-nginx /offline-bundle/nginx.tgz \
+
+kube create namespace offline-bundle --dry-run=client -o yaml |
+    docker exec -i "$NODE" kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f -
+# Preserve credentials across upgrades: an initialized PVC retains its password.
+# Generate only on the target; no secret is transported in the signed archive.
+existing_secret="$(kube -n offline-bundle get secret offline-postgresql-auth --ignore-not-found -o name)"
+if [[ -z "$existing_secret" ]]; then
+    existing_pvc="$(kube -n offline-bundle get pvc data-offline-postgresql-0 --ignore-not-found -o name)"
+    [[ -z "$existing_pvc" ]] ||
+        die "Existing PostgreSQL PVC has no auth Secret. Restore its original credentials; do not rotate blindly."
+    docker exec "$NODE" sh -ec '
+        umask 077
+        trap "rm -f /offline-bundle/postgres-password" EXIT
+        head -c 32 /dev/urandom | base64 | tr -d "\n" > /offline-bundle/postgres-password
+        kubectl --kubeconfig /etc/kubernetes/admin.conf -n offline-bundle \
+            create secret generic offline-postgresql-auth \
+            --from-file=password=/offline-bundle/postgres-password
+    '
+fi
+if ! docker exec "$NODE" offline-demo-helm upgrade --install offline-postgresql /offline-bundle/postgresql.tgz \
     --kubeconfig /etc/kubernetes/admin.conf \
     --namespace offline-bundle --create-namespace -f /offline-bundle/values.yaml \
     --set image.registry=localhost:5001 --set "image.digest=$digest" --wait --timeout 90s; then
     kube -n offline-bundle get pods -o wide >&2
+    kube -n offline-bundle get pvc >&2
     kube -n offline-bundle get events --sort-by=.lastTimestamp >&2
     die "Helm deployment failed."
 fi
 kube -n offline-bundle get pods -o wide
-kube -n offline-bundle get deployment offline-nginx -o json |
-    jq -e --arg image "localhost:5001/nginx@$digest" \
-        '.spec.template.spec.containers[0].image == $image and .status.availableReplicas == 1' >/dev/null
-response="$(kube -n offline-bundle exec deployment/offline-nginx -- curl -fsS --max-time 5 http://127.0.0.1:8080/)"
-grep -Fq 'Welcome to nginx!' <<< "$response" || die "nginx did not return its expected welcome page."
+kube -n offline-bundle get pod offline-postgresql-0 -o json |
+    jq -e --arg image "localhost:5001/postgres@$digest" '
+        .spec.containers[0].image == $image and .status.phase == "Running" and
+        any(.status.conditions[]; .type == "Ready" and .status == "True")
+    ' >/dev/null || die "PostgreSQL pod is not Running/Ready with the authenticated digest."
+kube -n offline-bundle get pvc data-offline-postgresql-0 -o json |
+    jq -e '.status.phase == "Bound"' >/dev/null || die "PostgreSQL PVC is not Bound."
+kube -n offline-bundle get pvc
+# TCP (not a trusted Unix socket) proves SCRAM password authentication works.
+# shellcheck disable=SC2016 # Expand database environment variables inside the pod.
+response="$(kube -n offline-bundle exec statefulset/offline-postgresql -- sh -ec '
+    export PGPASSWORD="$POSTGRES_PASSWORD" PGCONNECT_TIMEOUT=5
+    psql --host=127.0.0.1 --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
+        --no-password --set=ON_ERROR_STOP=1 --tuples-only --no-align \
+        --command="SELECT current_database(), current_user, 1;"
+')"
+[[ "$response" == 'demo|demo|1' ]] || die "Authenticated PostgreSQL query returned unexpected output: $response"
+printf 'SQL: %s\n' "$response"
 assert_offline
 printf '\nPASS: signature, every payload hash and imported image digest verified offline.\n'
-printf 'PASS: Helm deployed the official nginx image by authenticated digest; pod is Ready.\n'
-printf 'PASS: HTTP returned Welcome to nginx!; target still has no default route.\n'
+printf 'PASS: Helm deployed official PostgreSQL by authenticated digest; pod is Running/Ready, PVC Bound.\n'
+printf 'PASS: psql authenticated over TCP using the existing Secret; SQL returned demo|demo|1.\n'
+printf 'PASS: target still has no IPv4/IPv6 default route.\n'

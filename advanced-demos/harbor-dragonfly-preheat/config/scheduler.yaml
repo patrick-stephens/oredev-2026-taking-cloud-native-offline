@@ -1,0 +1,34 @@
+server:
+  port: 8002
+scheduler:
+  algorithm: default
+  backSourceCount: 3
+  retryBackSourceLimit: 5
+  retryLimit: 10
+  retryInterval: 100ms
+  gc:
+    peerTTL: 24h
+manager:
+  addr: manager:65003
+  schedulerClusterID: 1
+  keepAlive:
+    interval: 5s
+database:
+  redis:
+    addrs: [dragonfly-redis:6379]
+    brokerDB: 1
+    backendDB: 2
+seedPeer:
+  enable: true
+dynConfig:
+  refreshInterval: 5s
+job:
+  enable: true
+  globalWorkerNum: 1
+  schedulerWorkerNum: 1
+  localWorkerNum: 5
+metrics:
+  enable: true
+  addr: ":8000"
+console: true
+verbose: true

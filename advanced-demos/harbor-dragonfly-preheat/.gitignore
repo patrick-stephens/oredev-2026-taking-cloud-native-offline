@@ -1,0 +1,6 @@
+.state/
+artifacts/
+*.key
+*.crt
+*.pem
+*.env.local

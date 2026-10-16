@@ -1,0 +1,12 @@
+.tools/
+.state/
+.work/
+artifacts/
+*.rsa
+*.rsa.pub
+*.key
+*.pem
+*.crt
+*.tgz
+*.tar
+*.tar.gz

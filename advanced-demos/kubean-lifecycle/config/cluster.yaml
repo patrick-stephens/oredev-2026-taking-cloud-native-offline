@@ -1,0 +1,17 @@
+apiVersion: kubean.io/v1alpha1
+kind: Cluster
+metadata:
+  name: kubean-lifecycle
+  namespace: kubean-system
+  labels:
+    clusterName: kubean-lifecycle
+spec:
+  hostsConfRef:
+    namespace: kubean-system
+    name: kubean-lifecycle-hosts
+  varsConfRef:
+    namespace: kubean-system
+    name: kubean-lifecycle-vars
+  sshAuthRef:
+    namespace: kubean-system
+    name: kubean-lifecycle-ssh

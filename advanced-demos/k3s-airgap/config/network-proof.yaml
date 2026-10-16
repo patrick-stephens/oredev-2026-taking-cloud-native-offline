@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: network-proof
+  namespace: default
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  containers:
+    - name: proof
+      # Included in the k3s archive; explicitly seeded for the k0s comparison.
+      image: docker.io/rancher/mirrored-library-busybox:1.37.0
+      imagePullPolicy: Never
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -euo pipefail
+          nslookup kubernetes.default.svc.cluster.local
+          wget -T 5 -qO - http://whoami.offline-demo.svc.cluster.local/
+          if wget -T 5 -O /dev/null http://1.1.1.1/; then
+            echo 'EGRESS LEAK: pod reached an external IP' >&2
+            exit 1
+          fi
+          if nslookup registry-1.docker.io; then
+            echo 'EGRESS LEAK: cluster DNS resolved an external name' >&2
+            exit 1
+          fi
+          echo 'PASS: local DNS and service work; pod external IP and DNS fail.'
+      resources:
+        requests:
+          cpu: 10m
+          memory: 8Mi
+        limits:
+          cpu: 100m
+          memory: 32Mi

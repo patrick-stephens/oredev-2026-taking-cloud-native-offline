@@ -1,0 +1,8 @@
+check-for-app-update: false
+external-sources:
+  enable: false
+registry:
+  insecure-use-http: true
+db:
+  cache-dir: /bundle/grype-db
+  auto-update: false

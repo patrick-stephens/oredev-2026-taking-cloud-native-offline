@@ -1,0 +1,3 @@
+ARG APP_IMAGE=mccutchen/go-httpbin:2.26.0
+FROM ${APP_IMAGE}
+LABEL offline.demo.variant="unsigned"

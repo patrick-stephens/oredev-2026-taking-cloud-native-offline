@@ -1,0 +1,20 @@
+apiVersion: kubean.io/v1alpha1
+kind: ClusterOperation
+metadata:
+  name: kubean-lifecycle-install
+  namespace: kubean-system
+spec:
+  cluster: kubean-lifecycle
+  image: ghcr.io/kubean-io/spray-job:v0.34.2
+  actionType: playbook
+  action: cluster.yml
+  preHook:
+    - actionType: playbook
+      action: ping.yml
+    - actionType: playbook
+      action: disable-firewalld.yml
+  postHook:
+    - actionType: playbook
+      action: kubeconfig.yml
+    - actionType: playbook
+      action: cluster-info.yml

@@ -1,0 +1,6 @@
+[plugins.'io.containerd.cri.v1.images']
+  snapshotter = "overlayfs"
+  discard_unpacked_layers = false
+
+[plugins.'io.containerd.metadata.v1.bolt']
+  content_sharing_policy = "isolated"

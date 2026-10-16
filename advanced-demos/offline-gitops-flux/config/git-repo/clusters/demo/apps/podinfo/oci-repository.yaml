@@ -1,0 +1,11 @@
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: OCIRepository
+metadata:
+  name: podinfo-chart
+  namespace: podinfo
+spec:
+  interval: 1m
+  url: oci://__REGISTRY_IP__:5000/charts/podinfo
+  ref:
+    tag: 6.15.0
+  insecure: true

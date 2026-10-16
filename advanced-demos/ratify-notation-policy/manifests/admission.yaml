@@ -1,0 +1,36 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: offlinesignature
+spec:
+  crd:
+    spec:
+      names:
+        kind: OfflineSignature
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package offlinesignature
+
+        images[image] { image := input.review.object.spec.containers[_].image }
+        images[image] { image := input.review.object.spec.initContainers[_].image }
+        images[image] { image := input.review.object.spec.ephemeralContainers[_].image }
+
+        result := external_data({"provider": "ratify-provider", "keys": [i | images[i]]})
+
+        violation[{"msg": msg}] {
+          result.system_error != ""
+          msg := sprintf("Offline signature verification unavailable: %v", [result.system_error])
+        }
+        violation[{"msg": msg}] {
+          count(result.errors) > 0
+          msg := sprintf("Offline signature verification error: %v", [result.errors])
+        }
+        violation[{"msg": msg}] {
+          response := result.responses[_]
+          not response[1].isSuccess == true
+          msg := sprintf("Offline signature required: %s (Ratify trace: %s)", [response[0], response[1].traceID])
+        }
+        violation[{"msg": "Offline signature verification returned incomplete results"}] {
+          count(result.responses) != count(images)
+        }

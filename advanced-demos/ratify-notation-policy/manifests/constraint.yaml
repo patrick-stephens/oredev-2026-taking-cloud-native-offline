@@ -1,0 +1,11 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: OfflineSignature
+metadata:
+  name: offline-httpbin-signature
+spec:
+  enforcementAction: deny
+  match:
+    namespaces: [offline-demo]
+    kinds:
+      - apiGroups: [""]
+        kinds: [Pod]

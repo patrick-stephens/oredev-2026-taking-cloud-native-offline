@@ -13,7 +13,9 @@ SKOPEO=quay.io/skopeo/stable:v1.20.0
 COSIGN=ghcr.io/sigstore/cosign/cosign:v2.4.3
 ZOT=ghcr.io/project-zot/zot-linux-amd64:v2.1.15
 NODE_IMAGE=kindest/node:v1.35.0
-CHART_VERSION=22.0.11
+CHART_VERSION=0.1.0
+POSTGRES_TAG=18.6-alpine3.23
+POSTGRES_IMAGE="docker.io/library/postgres:$POSTGRES_TAG"
 
 die() {
     printf 'ERROR: %s\n' "$*" >&2

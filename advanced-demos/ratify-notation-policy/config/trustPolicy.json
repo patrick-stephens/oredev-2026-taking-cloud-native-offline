@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "trustPolicies": [
+    {
+      "name": "offline-httpbin",
+      "registryScopes": ["172.30.87.2:5000/demo/httpbin"],
+      "signatureVerification": {"level": "strict"},
+      "trustStores": ["ca:offline-demo"],
+      "trustedIdentities": ["x509.subject: C=US, ST=WA, L=Seattle, O=Notary, CN=offline-demo"]
+    }
+  ]
+}

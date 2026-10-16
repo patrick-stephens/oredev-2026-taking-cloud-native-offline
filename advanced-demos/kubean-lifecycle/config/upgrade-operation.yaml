@@ -1,0 +1,10 @@
+apiVersion: kubean.io/v1alpha1
+kind: ClusterOperation
+metadata:
+  name: kubean-lifecycle-upgrade
+  namespace: kubean-system
+spec:
+  cluster: kubean-lifecycle
+  image: ghcr.io/kubean-io/spray-job:v0.39.2
+  actionType: playbook
+  action: upgrade-cluster.yml
