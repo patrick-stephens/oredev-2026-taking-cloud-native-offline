@@ -1,0 +1,5 @@
+/demo-bundle/keys/
+/demo-bundle/.state/
+/demo-bundle/.build.*/
+/demo-bundle/.verify.*/
+/demo-bundle/bundle*.tar.gz

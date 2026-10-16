@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Connected side, from demo-bundle: ./scripts/build-bundle.sh
+# Equivalent image operation (containerized Skopeo below):
+# skopeo copy --override-os linux --override-arch amd64 \
+#   docker://docker.io/nginx:latest dir:images/nginx
+# helm pull oci://registry-1.docker.io/bitnamicharts/nginx --version 22.0.11
+# cosign sign-blob --tlog-upload=false --key keys/cosign.key \
+#   --output-signature metadata.sig metadata.json
+set -euo pipefail
+source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+banner "1 / CONNECTED: pull chart and image; sign the complete inventory"
+require_tools
+ensure_image "$SKOPEO"
+ensure_image "$COSIGN"
+umask 077
+work="$(mktemp -d "$DEMO_DIR/.build.XXXXXXXX")"
+trap 'remove_workdir "$work"' EXIT
+mkdir -p "$DEMO_DIR/keys" "$work/charts" "$work/images/nginx" "$work/keys"
+chmod 700 "$DEMO_DIR/keys"
+
+if [[ ! -e "$DEMO_DIR/keys/cosign.key" && ! -e "$DEMO_DIR/keys/cosign.pub" ]]; then
+    head -c 32 /dev/urandom | base64 > "$DEMO_DIR/keys/password"
+    COSIGN_PASSWORD="$(<"$DEMO_DIR/keys/password")"
+    export COSIGN_PASSWORD
+    signing_tool "$work" generate-key-pair
+fi
+[[ -s "$DEMO_DIR/keys/cosign.key" && -s "$DEMO_DIR/keys/cosign.pub" &&
+    -s "$DEMO_DIR/keys/password" ]] || die "Incomplete keys/ directory; restore the keypair and password."
+COSIGN_PASSWORD="$(<"$DEMO_DIR/keys/password")"
+export COSIGN_PASSWORD
+signing_tool "$work" public-key --key /keys/cosign.key > "$work/derived.pub"
+cmp "$work/derived.pub" "$DEMO_DIR/keys/cosign.pub" ||
+    die "The private and public signing keys do not match."
+cp "$DEMO_DIR/keys/cosign.pub" "$work/keys/cosign.pub"
+
+timeout 60s helm pull oci://registry-1.docker.io/bitnamicharts/nginx \
+    --version "$CHART_VERSION" --destination "$work/charts"
+timeout 100s docker run --rm --user "$(id -u):$(id -g)" \
+    --mount "type=bind,src=$work,dst=/bundle" "$SKOPEO" \
+    --command-timeout 90s copy --override-os linux --override-arch amd64 \
+    docker://docker.io/nginx:latest dir:/bundle/images/nginx
+cp "$DEMO_DIR/values.yaml" "$work/values.yaml"
+
+# Authenticate every chart dependency, image layer, config, manifest and values.
+# The signature covers this inventory, not just the image's small manifest.
+(
+    cd "$work"
+    find charts images keys values.yaml -type f -print0 | sort -z |
+        while IFS= read -r -d '' file; do
+            digest="$(sha256sum "$file")"
+            jq -n --arg path "$file" --arg sha256 "${digest%% *}" \
+                '{path:$path,sha256:$sha256}'
+        done | jq -s . > files.json
+    digest="$(sha256sum images/nginx/manifest.json)"
+    jq -n --arg digest "sha256:${digest%% *}" --arg version "$CHART_VERSION" \
+        --slurpfile files files.json \
+        '{schemaVersion:1,platform:"linux/amd64",
+          image:{reference:"docker.io/library/nginx:latest",digest:$digest},
+          chart:{name:"nginx",version:$version},files:$files[0]}' > metadata.json
+)
+signing_tool "$work" sign-blob --yes --tlog-upload=false --key /keys/cosign.key \
+    --output-signature /bundle/metadata.sig /bundle/metadata.json
+tar -C "$work" -czf "$work/bundle.tar.gz" \
+    charts images keys values.yaml metadata.json metadata.sig
+mv "$work/bundle.tar.gz" "$DEMO_DIR/bundle.tar.gz"
+printf '\nBUNDLE: %s/bundle.tar.gz\n' "$DEMO_DIR"
+printf 'TRUST OUT OF BAND: copy keys/cosign.pub separately to the target.\n'
+sha256sum "$DEMO_DIR/keys/cosign.pub"
+jq '{image,chart,authenticatedFiles:(.files|length)}' "$work/metadata.json"

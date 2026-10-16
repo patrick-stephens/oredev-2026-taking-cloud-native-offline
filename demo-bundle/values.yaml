@@ -1,0 +1,65 @@
+# The Bitnami chart's default command/layout targets Bitnami's image.
+# Bypass that entrypoint and supply a config compatible with official nginx.
+global:
+  security:
+    allowInsecureImages: true
+image:
+  registry: localhost:5001
+  repository: nginx
+  tag: latest
+  pullPolicy: Always
+command: ["nginx"]
+args: ["-c", "/etc/demo/nginx.conf", "-g", "daemon off;"]
+enableDefaultInitContainers: false
+containerPorts:
+  http: 8080
+containerSecurityContext:
+  runAsUser: 101
+  runAsGroup: 101
+podSecurityContext:
+  fsGroup: 101
+service:
+  type: ClusterIP
+livenessProbe:
+  initialDelaySeconds: 1
+readinessProbe:
+  initialDelaySeconds: 1
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+extraVolumes:
+  - name: official-nginx-config
+    configMap:
+      name: offline-nginx-config
+extraVolumeMounts:
+  - name: official-nginx-config
+    mountPath: /etc/demo
+    readOnly: true
+extraDeploy:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: offline-nginx-config
+    data:
+      nginx.conf: |
+        pid /tmp/nginx.pid;
+        error_log /dev/stderr notice;
+        events { worker_connections 128; }
+        http {
+          access_log /dev/stdout;
+          client_body_temp_path /tmp/client;
+          proxy_temp_path /tmp/proxy;
+          fastcgi_temp_path /tmp/fastcgi;
+          uwsgi_temp_path /tmp/uwsgi;
+          scgi_temp_path /tmp/scgi;
+          server {
+            listen 8080;
+            location / {
+              root /usr/share/nginx/html;
+              index index.html;
+            }
+          }
+        }
