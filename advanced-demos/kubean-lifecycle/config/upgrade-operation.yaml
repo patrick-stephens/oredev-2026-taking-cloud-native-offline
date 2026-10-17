@@ -9,3 +9,4 @@ spec:
   image: ghcr.io/kubean-io/spray-job:v0.39.2
   actionType: playbook
   action: upgrade-cluster.yml
+  extraArgs: --skip-tags=network

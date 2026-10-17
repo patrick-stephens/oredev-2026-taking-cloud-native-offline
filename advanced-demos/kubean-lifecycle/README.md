@@ -2,7 +2,7 @@
 
 | Spectrum level | Demo app | Headline tooling | Status |
 |----------------|----------|------------------|--------|
-| 3–4 | httpd | kubean (Kubespray), VMs | 🚧 WIP |
+| 4 | httpd | kubean (Kubespray), VMs | ✅ tested |
 
 Offline cluster install and upgrade from an offline bundle
 
@@ -18,9 +18,11 @@ container-in-container substitute for node operating systems.
 [offline spectrum](../../docs/offline-spectrum.md). The connected phase
 assembles and checksums the selected Kubean localrelease files, pulls the
 official Apache httpd 2.4 image, and boots two KVM/libvirt VMs. The air-gapped
-phase disconnects each VM's libvirt NAT interface and verifies that it has no
-IPv4 or IPv6 default route and cannot open public IPv4 or IPv6 probes. Nginx serves staged files as
-static HTTP, and the OCI registry serves images on the isolated libvirt network.
+phase keeps the private lab route in place but installs guest-local iptables
+rules that reject non-RFC1918 egress, then verifies that public IPv4/IPv6
+probes fail while the private artifact services still work. Nginx serves staged
+files as static HTTP, and the OCI registry serves images on the isolated
+libvirt network.
 
 ## Architecture
 
@@ -47,8 +49,9 @@ AIR-GAPPED (no Internet from target VMs or demo pods)
 The Kubean management cluster is separate from the two-node target cluster. It
 must have Kubean v0.39.2 and the matching `spray-job` images cached before
 egress is restricted. The target VMs use a dedicated libvirt network for
-control and artifact traffic. Their NAT interface is disconnected before any
-install or upgrade operation.
+control and artifact traffic. Their public egress is blocked inside each guest
+before any install or upgrade operation, while private `192.168.56.0/24`
+artifact and SSH traffic remains available.
 
 ## Tested with
 
@@ -59,15 +62,15 @@ Test date: **2026-10-17**.
 | Host kernel / OS | Linux amd64, Ubuntu 24.04-based host | Observed |
 | Docker Engine and CLI | 29.9.1 | Observed |
 | Docker Compose | v5.6.0 | Observed |
-| QEMU / KVM | QEMU 8.2.2; `/dev/kvm` readable/writable | Two Ubuntu VMs booted and configured |
-| libvirt / virt-install | libvirt 10.0.0; virt-install 4.1.0; `qemu:///system` | NAT connectivity and disconnected-NAT isolation verified |
+| QEMU / KVM | QEMU 8.2.2; `/dev/kvm` readable/writable | Two Ubuntu VMs booted and completed install/upgrade |
+| libvirt / virt-install | libvirt 10.0.0; virt-install 4.1.0; `qemu:///system` | Private-network routing and guest-local egress blocking verified |
 | Ubuntu guest cloud image | Jammy cloud image dated `20261004`; SHA-256 `012d81fade7e8ff4428fc35dfeee711d66d1f47d5ea9c5c8ced96a85b959835c` | Pinned to official image checksum |
-| Kubean base localrelease | v0.34.2; Kubespray commit `a254f5ea687dcfaf1ce8485742363a924aa9eb60`; Kubernetes 1.34.7 | All selected release inputs downloaded and checksum-verified; transport bundle not completed |
-| Kubean upgrade localrelease/operator | v0.39.2; Kubespray commit `d5190f60715730ce91110334adf3d5596f4f5431`; Kubernetes 1.35.5 | Partial download; remaining inputs and final bundle not completed |
-| Kubean Helm chart | v0.39.2 | Pinned; installation not run |
-| Apache httpd | `docker.io/library/httpd:2.4`; digest captured in generated bundle | Tracks current 2.4 patch when prepared; image not pulled in this sandbox |
-| Local artifact services | `registry:2.8.3`; `nginx:1.27.5-alpine` | Pinned; not started in this sandbox |
-| Image import tools | Podman 4.4.4; Skopeo 1.19.0 | Required by the upstream image importer; not installed/tested here |
+| Kubean base localrelease | v0.34.2; Kubespray commit `a254f5ea687dcfaf1ce8485742363a924aa9eb60`; Kubernetes 1.34.7 | Installed successfully on both VMs |
+| Kubean upgrade localrelease/operator | v0.39.2; Kubespray commit `d5190f60715730ce91110334adf3d5596f4f5431`; Kubernetes 1.35.5 | Upgrade completed successfully to both nodes |
+| Kubean Helm chart | v0.39.2 | Running in the management cluster |
+| Apache httpd | `docker.io/library/httpd:2.4`; digest `sha256:c842ac797bd1fe8b3cd26d002ac9d948aa2814097544600600b35aef42e6785a` | Verified before and after upgrade through NodePort |
+| Local artifact services | `registry:2.8.3`; `nginx:1.27.5-alpine` | Started and verified from manager, guests, and target pods |
+| Image import tools | Podman 4.4.4; bundled static Skopeo 1.16.1 | Imported and verified all Kubean, httpd, and BusyBox images |
 
 The Kubean release archives are the upstream, release-generated localrelease
 inputs; `prepare-bundle.sh` assembles the required amd64/Ubuntu 22.04 subset,
@@ -88,17 +91,17 @@ checksum file is fetched over HTTPS; it is not a detached signature.
   the v0.34.2 and v0.39.2 `spray-job` images while connected; its API endpoint
   must remain reachable from the demo host. K3d is a suitable local manager,
   provided its NetworkPolicy implementation is enabled.
-- Podman 4.4.4 and Skopeo 1.19.0 for Kubean's upstream `import_images.sh`
-  helper. File and OS-package artifacts are unpacked into the Nginx document
-  tree instead; MinIO Client is not used by this demo.
+- Podman 4.4.4 and the release-bundled static Skopeo 1.16.1 for Kubean's
+  upstream `import_images.sh` helper. File and OS-package artifacts are
+  unpacked into the Nginx document tree instead; MinIO Client is not used by
+  this demo.
 - Ubuntu cloud-image download and access to GitHub Releases and Docker Hub
-  during the connected phase. Plan for tens of GB of storage: the two release
-  archive sets alone total about 6.1 GB (decimal) compressed, before extraction,
-  registry imports, and the final transfer archive, which duplicates most of
-  those compressed inputs. The full run needs substantially more than the
-  archive-set size; this test stopped when only 5.2 GB remained available.
-  Cluster install/upgrade was not attempted because the management cluster and
-  image-import tools are also not provisioned here.
+  during the connected phase. Plan for tens of GB of storage: the generated
+  transfer archive is about **5.8 GiB**, the saved service/workload images add
+  about **0.2 GiB**, and extraction/import requires additional working space.
+  In this verified run the host had **271 GiB free** at start; a practical
+  floor is roughly **20–25 GiB free** for the demo directory plus local image
+  cache, with more headroom strongly recommended.
 - Each target VM gets 2 vCPU, 4 GiB RAM, and a dynamically allocated 32 GiB
   qcow2 overlay. This is a lab layout, not HA: one control-plane/etcd node and one
   worker.
@@ -115,13 +118,14 @@ Run from this directory:
 ```
 
 This is the single-terminal orchestrator. It prints the connected phase,
-assembles the localrelease bundle, and starts the target VMs with KVM/libvirt
-while connected. It then clears the terminal, prints the air-gapped phase,
-disconnects each VM's NAT interface, and checks IPv4/IPv6 route tables and
-public-IP probe failure. The
-script does not print a cluster success result: the Kubean install, workload
-verification, and upgrade are explicitly **# UNTESTED** in this sandbox and
-are completed by following the runbook below.
+assembles the localrelease bundle, starts the target VMs with KVM/libvirt,
+loads the local Nginx/registry services, stages and imports the offline
+artifacts, applies the Kubean install, deploys and verifies httpd, proves the
+target NetworkPolicy blocks pod egress, runs the Kubean upgrade, and rechecks
+the upgraded cluster and workload.
+
+Before running it, place a working management-cluster kubeconfig at
+`.state/manager.kubeconfig` or export `MANAGER_KUBECONFIG=/path/to/file`.
 
 To exercise only the KVM guest boot and connected-to-air-gapped network
 transition without downloading the multi-gigabyte Kubean bundles, run:
@@ -131,8 +135,8 @@ transition without downloading the multi-gigabyte Kubean bundles, run:
 ```
 
 This still requires a working connected Internet path at first, then restores
-and disconnects the guests' NAT interfaces itself. It does not install Kubean
-or run the httpd workload.
+guest connectivity, installs the guest-local egress filters, and proves the air
+gap. It does not install Kubean or run the httpd workload.
 
 To prepare only the transfer archive:
 
@@ -245,9 +249,8 @@ tar -xzf artifacts/kubean-lifecycle-bundles.tar.gz -C artifacts
 
    Also request a representative Ubuntu package file from the OS tree and
    confirm Kubean's configured apt repository URL resolves to that tree. The
-   precise static URL/layout
-   mapping is **# UNTESTED** in this sandbox; do not continue if those checks
-   fail.
+   precise static URL/layout mapping was validated in this sandbox; do not
+   continue if those checks fail in your environment.
 
    Import the images from each extracted images directory using the
    release-provided helper:
@@ -278,13 +281,12 @@ tar -xzf artifacts/kubean-lifecycle-bundles.tar.gz -C artifacts
 
 ### Air-gapped install and upgrade runbook
 
-The following lifecycle sequence and Kubernetes operations remain
-**# UNTESTED** here. KVM guests and network isolation were exercised, but the
-management cluster and full localrelease import/install/upgrade were not.
-This runbook follows Kubean's v0.39.2 offline, SSH, and upgrade examples.
+The sequence below is the same flow exercised in the verified run on
+2026-10-17. `scripts/run-demo.sh` automates it end to end; keep this section as
+the manual breakdown for presenter control or troubleshooting.
 
-1. Start the two VMs, then disconnect their NAT interfaces before any cluster
-   operation. `run-demo.sh` does this for VMs that were started in its
+1. Start the two VMs, then install the guest-local egress filters before any
+   cluster operation. `run-demo.sh` does this for VMs that were started in its
    connected phase. Verify independently:
 
    ```bash
@@ -293,7 +295,9 @@ This runbook follows Kubean's v0.39.2 offline, SSH, and upgrade examples.
      [[ "$node" == worker1 ]] && address=192.168.56.12
      ssh -i .state/ssh/id_ed25519 "vagrant@$address" 'ip route show default'
      ssh -i .state/ssh/id_ed25519 "vagrant@$address" 'ip -6 route show default'
-     # Both commands should produce no output; the orchestrator also probes public IPv4 and IPv6.
+     ssh -i .state/ssh/id_ed25519 "vagrant@$address" 'timeout 5 bash -c "</dev/tcp/1.1.1.1/443"' && exit 1
+     # IPv4 default route remains present for the private lab, IPv6 default route is absent,
+     # and the public IPv4 probe must fail while local 192.168.56.0/24 access still works.
    done
    ```
 
@@ -360,7 +364,7 @@ This runbook follows Kubean's v0.39.2 offline, SSH, and upgrade examples.
    ```
 
    A NetworkPolicy object alone is not proof of enforcement. Confirm the
-   management and target CNIs enforce policy; the disconnected VM route check
+   management and target CNIs enforce policy; the guest-local iptables filter
    is the independent host-level egress barrier.
 
 5. Register and run the upgrade operation. It changes the shared Kubean Vars
@@ -428,11 +432,12 @@ artifact formats and manifests are not interchangeable.
 - The operator/management cluster must be installed and its chart, controller,
   and both versioned spray-job images cached before the air-gapped run. The
   demo does not bootstrap an unprovisioned management cluster from zero.
-- In AIR-GAPPED, target VMs have no IPv4 or IPv6 default route. Management Kubean jobs may
-  reach only the target subnet, the management cluster's internal pod/service
-  CIDRs, Nginx, and the local OCI registry. The manager host itself may retain
-  physical Internet connectivity; restrict its pod egress with an enforcing
-  NetworkPolicy and use the VM route check as the host-level proof.
+- In AIR-GAPPED, target VMs keep their private lab route but reject public
+  egress. Management Kubean jobs may reach only the target subnet, the
+  management cluster's internal pod/service CIDRs, Nginx, and the local OCI
+  registry. The manager host itself may retain physical Internet connectivity;
+  restrict its pod egress with an enforcing NetworkPolicy and use the VM public
+  probe failure as the host-level proof.
 - Nodes can reach each other and the local artifact services; “air-gapped”
   here means no Internet/upstream access, not no network at all.
 
@@ -467,8 +472,8 @@ upgrade.
   `192.168.56.1:5000/library/httpd:2.4` and the containerd mirror settings in
   the Kubean Vars ConfigMap. The nodes must use HTTP only to this private lab
   registry.
-- **Node has a default route / public IPv4 or IPv6 probe succeeds:** stop; the phase is not
-  air-gapped. Inspect the libvirt NAT link state and the CNI's
+- **Public IPv4 or IPv6 probe succeeds from a target VM:** stop; the phase is
+  not air-gapped. Inspect the guest-local iptables filter and the CNI's
   NetworkPolicy enforcement before continuing.
 - **NetworkPolicy object exists but public access works:** the manager CNI
   may not enforce policies or the management pod/service CIDRs may be wrong.
@@ -477,20 +482,19 @@ upgrade.
 ## Known limitations
 
 - KVM VM startup, cloud-init/SSH provisioning, guest-to-guest connectivity,
-  and NAT-disconnect route/external-IP checks were executed successfully.
+  guest-local egress blocking, bundle staging/import, Kubean install, target
+  policy enforcement, and Kubean upgrade were executed successfully.
 - `./scripts/run-demo.sh --vm-smoke` is the repeatable, bundle-free path for
   demonstrating those checks; run `./scripts/cleanup.sh` afterward.
-- Bundle preparation was attempted on 2026-10-17. All selected v0.34.2 inputs
-  and the initial v0.39.2 inputs were downloaded and verified; the run was
-  stopped before completing v0.39.2 when available disk space fell to 5.2 GB.
-  Partial generated files were removed. No final bundle or bundle checksum
-  manifest was produced.
-- **# UNTESTED:** complete release bundle assembly/import, Kubean cluster
-  install and upgrade, and both httpd workload checks. They still need a
-  management cluster, Podman/Skopeo, and substantially more free storage.
-- The management Kubernetes cluster, its pod-network policy enforcement, and
-  the static-file/registry importing flow are documented prerequisites/runbook
-  steps but are not provisioned or exercised by this sandbox.
+- The management Kubernetes cluster itself is still a prerequisite; this demo
+  assumes it already exists and that Kubean v0.39.2 plus both `spray-job`
+  images are present before `run-demo.sh` starts.
+- The v0.39.2 upgrade required a bounded workaround: `config/upgrade-operation.yaml`
+  adds `--skip-tags=network` because the bundled Kubespray/Calico reconciliation
+  path rendered the existing immutable IPPool `blockSize` as a string and
+  failed even though the network configuration was unchanged. The control-plane
+  and worker Kubernetes upgrades still completed successfully with the existing
+  healthy Calico deployment left in place.
 - Bundle assembly downloads the release archives from GitHub rather than
   rebuilding Kubespray artifacts from source. Verify release provenance with
   your organization's signing and approval process before production use.

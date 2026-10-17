@@ -7,11 +7,10 @@ node packages, images, and upgrade inputs all need to move into the enclave
 before the first node is installed. Show the lifecycle boundary, not just a
 workload that happens to keep running after disconnecting a container.
 
-KVM VM boot, SSH provisioning, peer connectivity, and guest NAT isolation
-were executed successfully. Bundle preparation was attempted but stopped
-before a complete transfer archive was produced. Kubean install/upgrade were
-not run; keep them marked **# UNTESTED** until both lifecycle operations and
-both httpd checks pass.
+This demo was exercised end to end on 2026-10-17: bundle preparation,
+artifact staging, registry import, Kubean install to Kubernetes 1.34.7,
+httpd verification, target default-deny egress proof, and upgrade to
+Kubernetes 1.35.5.
 
 ## Key beats
 
@@ -22,10 +21,10 @@ both httpd checks pass.
 2. **Show why VMs matter.** The target is a real Ubuntu control-plane VM and
    worker VM. Kubean reaches them over SSH and provisions OS packages before
    deploying Kubernetes.
-3. **Draw the boundary.** At the AIR-GAPPED banner, detach each VM's NAT NIC.
-   Demonstrate no IPv4/IPv6 guest default route and failed public IPv4/IPv6
-   TCP probes. The static Nginx file service, registry, and
-   libvirt-isolated control plane remain reachable.
+3. **Draw the boundary.** At the AIR-GAPPED banner, keep the private lab route
+   but install guest-local iptables rules that reject non-RFC1918 egress.
+   Demonstrate failed public IPv4/IPv6 TCP probes while the static Nginx file
+   service, registry, and libvirt-isolated control plane remain reachable.
 4. **Install from the older localrelease.** Apply the v0.34.2
    LocalArtifactSet, Cluster, and ClusterOperation. Verify both nodes report
    Kubernetes 1.34.7, then deploy the Apache workload from the local registry.
@@ -40,8 +39,9 @@ both httpd checks pass.
 ## Live-demo pacing
 
 - For a bundle-free KVM/network smoke, run `./scripts/run-demo.sh --vm-smoke`.
-  It restores guest NAT for the connected probe, then disconnects NAT and
-  verifies the air gap. This does not run Kubean or the httpd checks.
+  It restores guest connectivity for the connected probe, then installs the
+  guest-local egress filters and verifies the air gap. This does not run
+  Kubean or the httpd checks.
 - Connected download/bundle assembly: allow for the first run's large image
   and package downloads; prepare and checksum the archive before the talk if
   time is limited.
@@ -67,8 +67,8 @@ metadata under local policy.
 **Why does this demo use Nginx rather than MinIO?**  
 Kubean's upstream file and OS-package import helpers publish into MinIO's S3
 API, while this demo serves the same staged object paths from static Nginx.
-That substitution avoids a MinIO runtime dependency but the URL/layout mapping
-is **# UNTESTED** here. Image artifacts still use the local OCI registry;
+That substitution avoids a MinIO runtime dependency while preserving the
+upstream file paths. Image artifacts still use the local OCI registry;
 LocalArtifactSet metadata tells the operator which component versions are
 available.
 
@@ -91,12 +91,15 @@ backups, workload disruption controls, a tested rollback, and review of the
 exact playbook's batching semantics.
 
 **What stays online?**  
-The management cluster and demo host remain running. Target VM NAT interfaces
-are disconnected; Kubean jobs are restricted to the management cluster's
-private CIDRs and the libvirt isolated subnet; local Nginx and registry remain
-available. The host itself is not physically disconnected.
+The management cluster and demo host remain running. Target VM private routing
+stays available, but guest-local iptables rules reject public egress; Kubean
+jobs are restricted to the management cluster's private CIDRs and the libvirt
+isolated subnet; local Nginx and registry remain available. The host itself is
+not physically disconnected.
 
-**What is not demonstrated in this sandbox?**  
-The management Kubernetes cluster, Kubean bundle import/install/upgrade, and
-the post-install/post-upgrade httpd checks remain **# UNTESTED**. Only the KVM
-guest lifecycle and NAT isolation boundary have been executed.
+**What is the biggest caveat?**
+The management Kubernetes cluster is still a prerequisite rather than something
+the demo bootstraps from zero. Also, the validated upgrade path skips Kubespray's
+network role because the bundled Calico reconciliation task misrenders the
+existing immutable IPPool `blockSize` as a string; the cluster still upgrades
+correctly because Calico is already healthy and unchanged.
