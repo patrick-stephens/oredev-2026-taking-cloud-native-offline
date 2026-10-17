@@ -1,15 +1,22 @@
 # Harbor + Dragonfly: preheat before the fleet arrives
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 1–2 | jenkins | harbor, dragonfly | 🚧 WIP |
+
+Enterprise registry hub + P2P preheat for large fleets
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 An advanced, single-terminal companion to **Taking cloud-native offline**.
 Harbor is the on-prem registry hub; its own P2P preheat policy seeds Dragonfly
 before five cold consumers request Jenkins. Then Harbor stops serving **all
 blobs**, including to the seed, while the consumers still obtain identical images.
 
-**Offline spectrum: level 3/4**, using this demo's explicit scale:
-1. opportunistic cache; 2. prefetched artifacts with upstream fallback;
-3. verified operation without external egress; 4. independently provisioned,
-physically disconnected environment with a complete update/trust lifecycle.
-This demonstrates level 3, not an offline installation of the host.
+**Catalogue spectrum: levels 1–2.** See the shared
+[offline spectrum](../../docs/offline-spectrum.md). This preheat demo focuses
+on registry and P2P distribution; it does not demonstrate offline installation
+of the host.
 
 ## Architecture
 

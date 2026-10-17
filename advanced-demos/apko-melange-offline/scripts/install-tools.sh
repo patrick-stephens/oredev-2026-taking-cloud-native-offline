@@ -35,9 +35,9 @@ install_release_binary \
 
 if [[ ! -x "$TOOLS/kubectl" ]]; then
     fetch https://dl.k8s.io/release/v1.33.5/bin/linux/amd64/kubectl "$TOOLS/kubectl"
-    expected_sha="$(curl --fail --location --silent --show-error --retry 3 --max-time 180 \
-        https://dl.k8s.io/release/v1.33.5/bin/linux/amd64/kubectl.sha256)"
-    printf '%s  %s\n' "$expected_sha" "$TOOLS/kubectl" | sha256sum --check -
+    printf '%s  %s\n' \
+        6a12d6c39e4a611a3687ee24d8c733961bb4bae1ae975f5204400c0a6930c6fc \
+        "$TOOLS/kubectl" | sha256sum --check -
     chmod +x "$TOOLS/kubectl"
 fi
 

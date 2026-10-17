@@ -1,5 +1,13 @@
 # Offline vulnerability scanning with transported databases
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 3 | node (old tag) | trivy, grype | 🚧 WIP |
+
+Vulnerability scanning with bundled, offline vulnerability databases
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 This demo scans a deliberately old, CVE-bearing container image with Trivy and
 Grype after moving each scanner's vulnerability database and an OCI image layout
 into an environment that has no external route. The local registry, import tool,
@@ -7,9 +15,10 @@ and scanner containers share a Docker `--internal` network. The scanners can
 reach the local registry, but cannot reach a vulnerability feed or the public
 internet.
 
-## Offline spectrum: level 3 of 4
+## Offline spectrum
 
-The scanner data and image are prepared as a portable archive, then used with
+Level 3 in the shared [offline spectrum](../../docs/offline-spectrum.md). The
+scanner data and image are prepared as a portable archive, then used with
 outbound networking blocked at the Docker network layer. This demonstrates
 offline image scanning and DB transport, not offline provisioning of the Docker
 engine or operating system. Those prerequisites must already be installed and

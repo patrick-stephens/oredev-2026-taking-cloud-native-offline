@@ -1,16 +1,22 @@
 # Taking cloud-native offline: carry the whole OCI artifact graph
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 2–3 | alpine | oras, zot, syft | 🚧 WIP |
+
+OCI 1.1 artifact graph (SBOM, policy, model) travels offline intact
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 An image mirror is incomplete when the deployment also needs its SBOM, policy,
 signature or model data. This demo takes the official stable **Alpine 3.24.2**
 image, attaches three small artifacts, exports their graph as an OCI layout, and
 reconstructs it in a fresh, isolated zot registry. No remote repositories are
 created, forked or pushed; the only pushes are into disposable local registries.
 
-**Offline spectrum: level 3 of 4 — a prepared, disconnected runtime enclave.**
-For this demo the spectrum is: (1) cached downloads, (2) explicitly bundled
-inputs, (3) verified operation with external egress blocked, (4) an independently
-operated air-gapped platform including provisioning, updates and trust services.
-This demonstrates level 3, not a physically disconnected host or level 4.
+**Offline spectrum: level 3.** See the shared [offline spectrum](../../docs/offline-spectrum.md).
+This demo uses a prepared, disconnected runtime enclave; it does not provision
+an independently operated air-gapped platform or claim a physically disconnected host.
 
 ## Why OCI 1.1 changes the offline strategy
 

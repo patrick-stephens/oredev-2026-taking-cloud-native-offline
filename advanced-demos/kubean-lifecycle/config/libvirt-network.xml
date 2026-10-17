@@ -1,0 +1,11 @@
+<network>
+  <name>kubean-lifecycle</name>
+  <bridge name='virbr56' stp='on' delay='0'/>
+  <ip address='192.168.56.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.56.100' end='192.168.56.200'/>
+      <host mac='52:54:00:56:10:11' name='kubean-cp1-nat' ip='192.168.56.11'/>
+      <host mac='52:54:00:56:10:12' name='kubean-worker1-nat' ip='192.168.56.12'/>
+    </dhcp>
+  </ip>
+</network>

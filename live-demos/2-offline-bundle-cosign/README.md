@@ -1,5 +1,13 @@
 # Taking cloud-native offline: a signed PostgreSQL bundle
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 3–4 | postgres | skopeo, cosign, helm, zot | 🚧 WIP |
+
+Signed bundle → verify → import → deploy a stateful workload offline
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 A **single-terminal** demonstration of an offline software supply chain:
 
 1. CONNECTED: **package our own Helm chart**, capture the official PostgreSQL
@@ -96,7 +104,7 @@ Docker, the node image and local tools remain part of the trusted computing base
 From the repository root:
 
 ```bash
-cd demo-bundle
+cd live-demos/2-offline-bundle-cosign
 ./run-demo.sh --tamper
 ```
 
@@ -165,7 +173,7 @@ Expected:
 1 chart(s) linted, 0 chart(s) failed
 Successfully packaged chart ...
 Wrote signature to file /bundle/metadata.sig
-BUNDLE: .../demo-bundle/bundle.tar.gz
+BUNDLE: .../live-demos/2-offline-bundle-cosign/bundle.tar.gz
 TRUST OUT OF BAND: copy keys/cosign.pub separately to the target.
 ```
 

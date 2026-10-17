@@ -8,6 +8,9 @@ source "$SCRIPT_DIR/common.sh"
 require_tools
 ensure_k3d
 assert_demo_resource_free
+DEMO_ROLLBACK="${DEMO_ROLLBACK:-0}"
+[[ "$DEMO_ROLLBACK" == 0 || "$DEMO_ROLLBACK" == 1 ]] ||
+    die "DEMO_ROLLBACK must be 0 or 1."
 
 started=$SECONDS
 finish() {
@@ -56,7 +59,12 @@ trap 'exit 143' TERM
 
 banner '=== PHASE CONNECTED: seed the registry and prepare the three-node cluster ==='
 docker network create --label demo=spegel-p2p "$NETWORK" >/dev/null
+registry_options=()
+if [[ "$DEMO_ROLLBACK" == 1 ]]; then
+    registry_options+=(--env REGISTRY_STORAGE_DELETE_ENABLED=true)
+fi
 docker run --detach --name "$REGISTRY" --label demo=spegel-p2p \
+    "${registry_options[@]}" \
     --publish "127.0.0.1:$REGISTRY_PORT:5000" "$REGISTRY_IMAGE" >/dev/null
 docker network connect --alias registry "$NETWORK" "$REGISTRY"
 
@@ -143,6 +151,24 @@ docker exec "$NODE_A" ctr --address /run/k3s/containerd/containerd.sock \
 printf 'Node B image record: absent, as required.\n'
 printf 'Containerd patch: discard_unpacked_layers=false; snapshotter=overlayfs on all three nodes.\n'
 printf 'Registry endpoint: http://registry:%s (separate container, connected to the cluster network).\n' "$REGISTRY_PORT"
+if [[ "$DEMO_ROLLBACK" == 1 ]]; then
+    manifest_digest="$(curl --fail --silent --show-error --head \
+        --header 'Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json' \
+        "http://127.0.0.1:$REGISTRY_PORT/v2/library/redis/manifests/alpine" |
+        awk 'BEGIN { IGNORECASE=1 } /^Docker-Content-Digest:/ { gsub("\r", "", $2); print $2 }')"
+    [[ "$manifest_digest" =~ ^sha256:[[:xdigit:]]{64}$ ]] ||
+        die "Could not identify the Redis manifest digest for the rollback exercise."
+    delete_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+        --request DELETE \
+        "http://127.0.0.1:$REGISTRY_PORT/v2/library/redis/manifests/$manifest_digest")"
+    [[ "$delete_status" == 202 ]] ||
+        die "Registry refused manifest deletion for the rollback exercise (HTTP $delete_status)."
+    tag_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+        --head "http://127.0.0.1:$REGISTRY_PORT/v2/library/redis/manifests/alpine")"
+    [[ "$tag_status" == 404 ]] ||
+        die "Redis tag still resolves in the registry after manifest deletion (HTTP $tag_status)."
+    printf 'ROLLBACK SETUP: deleted registry manifest %s; alpine now returns HTTP 404.\n' "$manifest_digest"
+fi
 
 advance
 banner '=== PHASE AIR-GAPPED: stop the registry and prove peer distribution ==='
@@ -197,6 +223,48 @@ printf '%s\n' "$METRICS" | grep -E '^spegel_(mirror_requests_total|mirror_last_s
 printf '%s\n' "$METRICS" |
     awk '$1 ~ /^spegel_mirror_requests_total/ && $0 ~ /cache="hit"/ && $NF + 0 > 0 { found=1 } END { exit !found }' ||
     die "Node B did not report a successful peer mirror hit."
+
+if [[ "$DEMO_ROLLBACK" == 1 ]]; then
+    HIT_COUNT_BEFORE="$(printf '%s\n' "$METRICS" |
+        awk '$1 ~ /^spegel_mirror_requests_total/ && $0 ~ /cache="hit"/ && $0 ~ /registry="registry:5000"/ { print $NF; found=1 } END { if (!found) exit 1 }')"
+    [[ "$HIT_COUNT_BEFORE" =~ ^[0-9]+([.][0-9]+)?$ ]] ||
+        die "Could not parse the initial Spegel peer-hit metric."
+    printf '\nROLLBACK EXERCISE: remove agent 1 image metadata and recreate its Redis pod after registry deletion.\n'
+    docker exec "$NODE_B" ctr --address /run/k3s/containerd/containerd.sock \
+        --namespace k8s.io images rm --sync "$REDIS_IMAGE"
+    if redis_image_on_node "$NODE_B"; then
+        die "Redis image reference remains on node B after synchronous removal."
+    fi
+    OLD_REDIS_B_POD="$REDIS_B_POD"
+    kube delete pod "$OLD_REDIS_B_POD" --wait=true --timeout=60s
+    kube wait --for=condition=Ready pod -l app=redis-peer-demo \
+        --field-selector "spec.nodeName=$NODE_B_NAME" --timeout=180s
+    RECREATED_POD="$(kube get pods -l app=redis-peer-demo \
+        --field-selector "spec.nodeName=$NODE_B_NAME" \
+        -o 'custom-columns=NAME:.metadata.name,PHASE:.status.phase' --no-headers |
+        awk -v old="$OLD_REDIS_B_POD" '$1 != old && $2 == "Running" { print $1; exit }')"
+    [[ -n "$RECREATED_POD" ]] ||
+        die "No replacement Redis pod reached Running on node B."
+    redis_image_on_node "$NODE_B" ||
+        die "Redis was not restored in node B containerd after pod recreation."
+    METRICS_AFTER_ROLLBACK="$(kube get --raw "/api/v1/namespaces/spegel/pods/$SPEGEL_B_POD:9090/proxy/metrics")"
+    HIT_COUNT_AFTER="$(printf '%s\n' "$METRICS_AFTER_ROLLBACK" |
+        awk '$1 ~ /^spegel_mirror_requests_total/ && $0 ~ /cache="hit"/ && $0 ~ /registry="registry:5000"/ { print $NF; found=1 } END { if (!found) exit 1 }')"
+    [[ "$HIT_COUNT_AFTER" =~ ^[0-9]+([.][0-9]+)?$ ]] ||
+        die "Could not parse the Spegel peer-hit metric after pod recreation."
+    awk -v before="$HIT_COUNT_BEFORE" -v after="$HIT_COUNT_AFTER" \
+        'BEGIN { if (after <= before) exit 1 }' ||
+        die "Spegel peer-hit metric did not increase for the recreated pod."
+    printf 'ROLLBACK PASS: %s replaced %s on node B after registry manifest deletion; peer hits %s -> %s.\n' \
+        "$RECREATED_POD" "$OLD_REDIS_B_POD" "$HIT_COUNT_BEFORE" "$HIT_COUNT_AFTER"
+    printf '\nAgent 0 Spegel logs for the recreated pod pull:\n'
+    kube logs -n spegel "$SPEGEL_A_POD" --all-containers=true --prefix --since=2m |
+        grep -E 'path":"/v2/library/redis/(manifests|blobs)/|path":"/v2/library/redis/blobs/' ||
+        die "Agent 0 did not log Redis manifest or blob requests after rollback."
+    printf '\nSpegel metrics after rollback:\n'
+    printf '%s\n' "$METRICS_AFTER_ROLLBACK" |
+        grep -E '^spegel_(mirror_requests_total|mirror_last_success_timestamp_seconds|resolve_duration_seconds|advertised_keys)'
+fi
 
 printf '\nPASS: node B started Redis with the central registry stopped and external egress blocked.\n'
 printf 'PASS: Redis is present in node B containerd; Spegel reports a peer mirror hit.\n'

@@ -1,5 +1,13 @@
 # Taking cloud-native offline: a pull-through cache
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 1 | nginx | zot, skopeo, helm | 🚧 WIP |
+
+Keep serving images while the upstream registry is unreachable
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 This single-terminal demo runs [zot](https://zotregistry.dev/v2.1.15/articles/mirroring/)
 as an on-demand proxy for Docker Hub's official `nginx:latest`. The first request
 fetches from Docker Hub. An explicit **cache-only mode** freezes cached tags
@@ -55,7 +63,7 @@ external network is disconnected. During isolation, the scripts reach
 From the repository root:
 
 ```bash
-cd demo-cache
+cd live-demos/1-pull-through-cache-zot
 ./scripts/start-cache.sh
 ./scripts/prime-cache.sh
 ./scripts/verify-cache.sh

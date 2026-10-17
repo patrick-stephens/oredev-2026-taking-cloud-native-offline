@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Connected side, from demo-bundle: ./scripts/build-bundle.sh
+# Connected side, from live-demos/2-offline-bundle-cosign: ./scripts/build-bundle.sh
 # Equivalent image operation (containerized Skopeo below):
 # skopeo copy --override-os linux --override-arch amd64 \
 #   docker://docker.io/library/postgres:18.6-alpine3.23 dir:images/postgres

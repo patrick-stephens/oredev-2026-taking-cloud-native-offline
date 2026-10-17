@@ -1,18 +1,26 @@
 # Kubean cluster lifecycle from localrelease
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 3–4 | httpd | kubean (Kubespray), VMs | 🚧 WIP |
+
+Offline cluster install and upgrade from an offline bundle
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 Kubernetes itself has a lifecycle. This demo uses Kubean's Kubespray-based
 cluster operations to install a cluster on real Ubuntu VMs from Kubean's
 release-published offline artifacts, then upgrade it to a newer supported
 Kubernetes minor using a second localrelease. It is intentionally not a
 container-in-container substitute for node operating systems.
 
-**Offline spectrum: level 4 — offline cluster provisioning and lifecycle
-operations from a staged release bundle.** The connected phase assembles and
-checksums the selected Kubean localrelease files, pulls the official Apache
-httpd 2.4 image, and boots the VMs. The air-gapped phase disconnects the VMs'
-VirtualBox NAT adapters and verifies that they have no default route and cannot
-open an external IP. Nginx serves staged files as static HTTP, and the OCI
-registry serves images on the private host-only network.
+**Offline spectrum: level 4.** See the shared
+[offline spectrum](../../docs/offline-spectrum.md). The connected phase
+assembles and checksums the selected Kubean localrelease files, pulls the
+official Apache httpd 2.4 image, and boots two KVM/libvirt VMs. The air-gapped
+phase disconnects each VM's libvirt NAT interface and verifies that it has no
+default route and cannot open an external IP. Nginx serves staged files as
+static HTTP, and the OCI registry serves images on the isolated libvirt network.
 
 ## Architecture
 
@@ -25,7 +33,7 @@ CONNECTED (host has Internet)
                                   artifacts/kubean-lifecycle-bundles.tar.gz
 
 AIR-GAPPED (no Internet from target VMs or demo pods)
-                         host-only network 192.168.56.0/24
+                    isolated libvirt network 192.168.56.0/24
   Kubean management K8s ────────┬──── SSH ──> cp1 (Ubuntu VM)
   (operator/job images cached)  │             worker1 (Ubuntu VM)
                                 ├──── HTTP ──> Nginx :8080 (OS pkgs/binaries)
@@ -38,9 +46,9 @@ AIR-GAPPED (no Internet from target VMs or demo pods)
 
 The Kubean management cluster is separate from the two-node target cluster. It
 must have Kubean v0.39.2 and the matching `spray-job` images cached before
-egress is restricted. The target VMs use the host-only adapter for control and
-artifact traffic. Their NAT adapter is disconnected before any install or
-upgrade operation.
+egress is restricted. The target VMs use a dedicated libvirt network for
+control and artifact traffic. Their NAT interface is disconnected before any
+install or upgrade operation.
 
 ## Tested with
 
@@ -51,9 +59,9 @@ Test date: **2026-10-16**.
 | Host kernel / OS | Linux amd64, Ubuntu 24.04-based host | Observed |
 | Docker Engine and CLI | 29.9.1 | Observed |
 | Docker Compose | v5.6.0 | Observed |
-| VirtualBox | 7.2.20 | Observed; VM start is blocked by host device permissions |
-| Vagrant | 2.4.9 | Observed |
-| VirtualBox guest box | `ubuntu/jammy64` `20241002.0.0` | Pinned; not booted here |
+| QEMU / KVM | QEMU 8.2.2; `/dev/kvm` readable/writable | Two Ubuntu VMs booted and configured |
+| libvirt / virt-install | libvirt 10.0.0; virt-install 4.1.0; `qemu:///system` | NAT connectivity and disconnected-NAT isolation verified |
+| Ubuntu guest cloud image | Jammy cloud image dated `20261004`; SHA-256 `012d81fade7e8ff4428fc35dfeee711d66d1f47d5ea9c5c8ced96a85b959835c` | Pinned to official image checksum |
 | Kubean base localrelease | v0.34.2; Kubespray commit `a254f5ea687dcfaf1ce8485742363a924aa9eb60`; Kubernetes 1.34.7 | Pinned; bundle not downloaded in this sandbox |
 | Kubean upgrade localrelease/operator | v0.39.2; Kubespray commit `d5190f60715730ce91110334adf3d5596f4f5431`; Kubernetes 1.35.5 | Pinned; bundle not downloaded in this sandbox |
 | Kubean Helm chart | v0.39.2 | Pinned; installation not run |
@@ -71,10 +79,10 @@ checksum file is fetched over HTTPS; it is not a detached signature.
 ## Prerequisites
 
 - Linux amd64 host with Docker Engine/CLI, the Docker Compose plugin,
-  VirtualBox, and Vagrant. The account must be able to use `/dev/vboxdrv` and
-  create/use a VirtualBox host-only network.
-- `curl`, `awk`, `sha256sum`, `tar`, `find`, `sort`, `xargs`,
-  `VBoxManage`, and `vagrant`.
+  QEMU/KVM, libvirt system service, and permission to use `/dev/kvm` and
+  `qemu:///system`.
+- `curl`, `awk`, `sha256sum`, `tar`, `find`, `sort`, `xargs`, `virsh`,
+  `virt-install`, `qemu-img`, `ssh`, and `ssh-keygen`.
 - A connected management Kubernetes cluster with `kubectl` and Helm. The
   management cluster is not a target node. Install Kubean v0.39.2 and preload
   the v0.34.2 and v0.39.2 `spray-job` images while connected; its API endpoint
@@ -83,11 +91,14 @@ checksum file is fetched over HTTPS; it is not a detached signature.
 - Podman 4.4.4 and Skopeo 1.19.0 for Kubean's upstream `import_images.sh`
   helper. File and OS-package artifacts are unpacked into the Nginx document
   tree instead; MinIO Client is not used by this demo.
-- Vagrant box download and access to GitHub Releases and Docker Hub during the
-  connected phase. Plan for tens of GB of temporary storage; the two complete
-  release image bundles are sizeable.
-- Each target VM gets 2 vCPU and 4 GiB RAM. Vagrant disks are dynamically
-  allocated. This is a lab layout, not HA: one control-plane/etcd node and one
+- Ubuntu cloud-image download and access to GitHub Releases and Docker Hub
+  during the connected phase. Plan for tens of GB of storage: the two release
+  archive sets alone are about 5.3 GB compressed, before extraction, registry
+  imports, and the final transfer archive. This sandbox has about 21 GB free;
+  the full lifecycle was not attempted because the management cluster and
+  image-import tools are also not provisioned here.
+- Each target VM gets 2 vCPU, 4 GiB RAM, and a dynamically allocated 32 GiB
+  qcow2 overlay. This is a lab layout, not HA: one control-plane/etcd node and one
   worker.
 
 The local Nginx and registry use unauthenticated plain HTTP on a private lab
@@ -102,12 +113,24 @@ Run from this directory:
 ```
 
 This is the single-terminal orchestrator. It prints the connected phase,
-assembles the localrelease bundle, and starts the target VMs while connected.
-It then clears the terminal, prints the air-gapped phase, disconnects each
-VM's NAT adapter, and checks both route-table and external-IP failure. The
+assembles the localrelease bundle, and starts the target VMs with KVM/libvirt
+while connected. It then clears the terminal, prints the air-gapped phase,
+disconnects each VM's NAT interface, and checks both route-table and
+external-IP failure. The
 script does not print a cluster success result: the Kubean install, workload
 verification, and upgrade are explicitly **# UNTESTED** in this sandbox and
 are completed by following the runbook below.
+
+To exercise only the KVM guest boot and connected-to-air-gapped network
+transition without downloading the multi-gigabyte Kubean bundles, run:
+
+```bash
+./scripts/run-demo.sh --vm-smoke
+```
+
+This still requires a working connected Internet path at first, then restores
+and disconnects the guests' NAT interfaces itself. It does not install Kubean
+or run the httpd workload.
 
 To prepare only the transfer archive:
 
@@ -161,11 +184,13 @@ tar -xzf artifacts/kubean-lifecycle-bundles.tar.gz -C artifacts
    Use the equivalent image-load method for another cluster runtime. The
    operation manifests refer to these exact tags; do not rely on a pull
    during the air-gapped phase.
-3. Start the two target VMs using the connected phase of `run-demo.sh`. Vagrant
-   uses the pinned Ubuntu Jammy box and a host-only adapter at
-   `192.168.56.0/24`.
+3. Start the two target VMs using the connected phase of `run-demo.sh`.
+   `scripts/kvm.sh up` downloads and checksum-verifies the pinned Ubuntu Jammy
+   cloud image, creates two qcow2 overlays, and attaches each VM to the
+   libvirt NAT network and a dedicated isolated `192.168.56.0/24` network.
+   Cloud-init provisions a demo SSH key; generated state is ignored by Git.
 4. Load the service images from the transfer bundle and start the local file
-   and registry services only after the private host-only interface exists:
+   and registry services only after the isolated libvirt network exists:
 
    ```bash
    docker image load --input artifacts/artifact-services.tar
@@ -199,7 +224,7 @@ tar -xzf artifacts/kubean-lifecycle-bundles.tar.gz -C artifacts
    ```
 
    Check every listed binary URL against the staged hostname/path layout and
-   fetch representative files from the host-only endpoint:
+   fetch representative files from the private endpoint:
 
    ```bash
    for version in v0.34.2 v0.39.2; do
@@ -244,35 +269,38 @@ tar -xzf artifacts/kubean-lifecycle-bundles.tar.gz -C artifacts
      docker://192.168.56.1:5000/library/httpd:2.4
    ```
 
-7. Verify the local services are reachable from both VMs on the host-only
+7. Verify the local services are reachable from both VMs on the isolated
    network, and preload the spray-job images in the management cluster. Keep
    the management context and the target cluster's kubeconfig distinct.
 
 ### Air-gapped install and upgrade runbook
 
-The following lifecycle sequence and Kubernetes operations are
-**# UNTESTED** here because this sandbox cannot access the VirtualBox kernel
-device. It follows Kubean's v0.39.2 offline, SSH, and upgrade examples.
+The following lifecycle sequence and Kubernetes operations remain
+**# UNTESTED** here. KVM guests and network isolation were exercised, but the
+management cluster and full localrelease import/install/upgrade were not.
+This runbook follows Kubean's v0.39.2 offline, SSH, and upgrade examples.
 
-1. Start the two VMs, then disconnect their NAT adapters before any cluster
+1. Start the two VMs, then disconnect their NAT interfaces before any cluster
    operation. `run-demo.sh` does this for VMs that were started in its
    connected phase. Verify independently:
 
    ```bash
    for node in cp1 worker1; do
-     vagrant ssh "$node" -- 'ip route show default'
+     address=192.168.56.11
+     [[ "$node" == worker1 ]] && address=192.168.56.12
+     ssh -i .state/ssh/id_ed25519 "vagrant@$address" 'ip route show default'
      # Expected: no output; the orchestrator also probes 1.1.1.1:443.
    done
    ```
 
 2. Apply the v0.34.2 localartifactset to the Kubean management cluster. Then
    install the demo inventory, Vars ConfigMap, Cluster CR, and SSH Secret.
-   Generate the Secret from the Vagrant key; the key file is deliberately not
-   in Git:
+   Generate the Secret from the demo SSH key; the key file is deliberately
+   not in Git:
 
    ```bash
    MANAGER_KUBECONFIG=/path/to/management.kubeconfig
-   SSH_KEY="$(vagrant ssh-config cp1 | awk '/IdentityFile/ {print $2; exit}' | tr -d '"')"
+   SSH_KEY="$PWD/.state/ssh/id_ed25519"
    kubectl --kubeconfig "$MANAGER_KUBECONFIG" -n kubean-system create secret generic \
      kubean-lifecycle-ssh --type=kubernetes.io/ssh-auth \
      --from-file=ssh-privatekey="$SSH_KEY" --dry-run=client -o yaml |
@@ -283,8 +311,8 @@ device. It follows Kubean's v0.39.2 offline, SSH, and upgrade examples.
    kubectl --kubeconfig "$MANAGER_KUBECONFIG" apply -f config/cluster.yaml
    ```
 
-   `vagrant ssh-config` is the same key that Vagrant has provisioned into the
-   two guest VMs. Confirm the manager's Kubean job can reach SSH on both
+   The generated SSH key is provisioned into both guest VMs using cloud-init.
+   Confirm the manager's Kubean job can reach SSH on both
    `192.168.56.11` and `.12`, Nginx on port 8080, and the local registry on
    port 5000. `config/vars-v1.yaml` points Kubespray at those local endpoints
    and selects Kubernetes 1.34.7.
@@ -391,7 +419,7 @@ artifact formats and manifests are not interchangeable.
 ## Where network is still required
 
 - Internet is required in CONNECTED to fetch the pinned Kubean release
-  archives, the Ubuntu Vagrant box, the current stable httpd 2.4 image, and
+  archives, the pinned Ubuntu Jammy cloud image, the current stable httpd 2.4 image, and
   local service images.
 - The operator/management cluster must be installed and its chart, controller,
   and both versioned spray-job images cached before the air-gapped run. The
@@ -417,13 +445,11 @@ upgrade.
 
 ## Troubleshooting
 
-- **VirtualBox access denied / `/dev/vboxdrv` is not writable:** install or
-  load the VirtualBox host module and grant the demo account authorized
-  device access. Do not work around this by running the demo as root. This
-  sandbox hits this limitation, so its VM/Kubean lifecycle steps are
-  `# UNTESTED`.
-- **Vagrant host-only network creation fails:** confirm VirtualBox host-only
-  networking is enabled and the `192.168.56.0/24` range is not already in use.
+- **KVM/libvirt access denied:** confirm `/dev/kvm` is readable/writable and
+  the account is authorized to use the libvirt system connection. Do not work
+  around this by running the demo as root.
+- **Libvirt network cannot start:** confirm `192.168.56.0/24` is not already
+  assigned on the host or another VM network.
 - **`sha256sum` mismatch:** remove only the affected file under
   `artifacts/kubean/<tag>/` and rerun `scripts/prepare-bundle.sh`; investigate
   the download before transferring it.
@@ -438,7 +464,7 @@ upgrade.
   the Kubean Vars ConfigMap. The nodes must use HTTP only to this private lab
   registry.
 - **Node has a default route / public probe succeeds:** stop; the phase is not
-  air-gapped. Inspect VirtualBox adapter link state and the CNI's
+  air-gapped. Inspect the libvirt NAT link state and the CNI's
   NetworkPolicy enforcement before continuing.
 - **NetworkPolicy object exists but public access works:** the manager CNI
   may not enforce policies or the management pod/service CIDRs may be wrong.
@@ -446,10 +472,14 @@ upgrade.
 
 ## Known limitations
 
-- **# UNTESTED:** This sandbox cannot access `/dev/vboxdrv` as the current
-  account (`root:root`, mode `0600`; `sudo` requires an interactive
-  password). No VM was booted, no Kubean localrelease was downloaded, and no
-  cluster install/upgrade or httpd workload was run.
+- KVM VM startup, cloud-init/SSH provisioning, guest-to-guest connectivity,
+  and NAT-disconnect route/external-IP checks were executed successfully.
+- `./scripts/run-demo.sh --vm-smoke` is the repeatable, bundle-free path for
+  demonstrating those checks; run `./scripts/cleanup.sh` afterward.
+- **# UNTESTED:** release bundle assembly/import, Kubean cluster install and
+  upgrade, and both httpd workload checks. They need a management cluster,
+  Podman/Skopeo, and substantial free storage, which were not provisioned for
+  this KVM smoke test.
 - The management Kubernetes cluster, its pod-network policy enforcement, and
   the static-file/registry importing flow are documented prerequisites/runbook
   steps but are not provisioned or exercised by this sandbox.
@@ -457,10 +487,10 @@ upgrade.
   rebuilding Kubespray artifacts from source. Verify release provenance with
   your organization's signing and approval process before production use.
 - The Nginx and registry endpoints are unauthenticated HTTP from the lab
-  clients. They are bound to the VirtualBox host-only address and the demo
+  clients. They are bound to the libvirt bridge address and the demo
   Compose network is Docker `internal`; this is not a secure repository
   deployment pattern.
-- The host-only CIDR, K3d pod/service CIDRs, OS image, and containerd mirror
+- The libvirt isolated CIDR, K3d pod/service CIDRs, OS image, and containerd mirror
   settings are deliberately fixed for a reproducible lab; adapt and re-test
   them for another virtualization provider or Kubernetes CNI.
 
@@ -470,8 +500,8 @@ upgrade.
 ./scripts/cleanup.sh
 ```
 
-Cleanup destroys only the VMs in this demo's Vagrant project, stops this
-demo's Compose services, and removes generated secrets, state, and bundle
+Cleanup destroys only the VMs and private network created by this demo, stops
+this demo's Compose services, and removes generated secrets, state, and bundle
 files. It leaves shared Docker images and any external management cluster
 untouched. To retain the localrelease files for another run, copy the ignored
 `artifacts/` directory before cleanup.

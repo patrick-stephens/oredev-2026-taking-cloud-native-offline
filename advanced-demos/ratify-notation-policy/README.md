@@ -1,14 +1,21 @@
 # Offline admission: Ratify + Notation + local trust
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 3–4 | go-httpbin | ratify, notation | 🚧 WIP |
+
+Deploy-time signature verification with locally bundled trust roots
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 Transfer-time verification is not deployment-time enforcement. This demo makes
 the API server ask Gatekeeper and Ratify before admitting a Pod, while the
 cluster cannot reach the internet. The application is **mccutchen/go-httpbin
 2.26.0**, the latest stable release checked on 2026-10-16; there is no nginx.
 
-**Offline spectrum: level 3 of 4**, a prepared, disconnected runtime enclave:
-(1) cached downloads, (2) explicitly staged dependencies, (3) offline execution
-and admission, (4) autonomous offline provisioning, updates and trust lifecycle.
-This demonstrates level 3, not level 4 or a physically disconnected host.
+**Offline spectrum: level 3.** See the shared [offline spectrum](../../docs/offline-spectrum.md).
+This demo covers offline execution and admission, not autonomous offline
+provisioning, updates, trust lifecycle, or a physically disconnected host.
 
 The tested baseline is **Ratify**, not a Kyverno substitute. It admits a signed
 image, pins its digest, rejects an unsigned image, and rejects a previously

@@ -1,5 +1,13 @@
 # Multi-architecture OCI bundle, verified offline
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 2–3 | busybox (+ custom arm64 build) | skopeo --all, buildx, QEMU | 🚧 WIP |
+
+Architecture-portable bundles (amd64 + arm64)
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 An edge site running ARM hardware cannot use an amd64-only image cache. A tag
 that looks present may resolve to a manifest index whose arm64 child was never
 copied. This demo captures the official BusyBox `stable` image as a complete
@@ -11,10 +19,11 @@ It also builds a tiny static HTTP server with Buildx for `linux/arm64`, pushes
 it to zot while connected, and runs an HTTP loopback self-test with Docker
 networking disabled after isolation.
 
-**Offline spectrum: level 2 — multi-platform artifacts staged in a local OCI
-registry, then consumed with external egress removed.** The Docker host and
-daemon remain online; this is a container-network isolation demo, not a
-physically disconnected host or a cold-start image-store bootstrap.
+**Offline spectrum: levels 2–3.** See the shared
+[offline spectrum](../../docs/offline-spectrum.md). Multi-platform artifacts
+are staged in a local OCI registry and consumed with external egress removed.
+The Docker host and daemon remain online; this is not a physically disconnected
+host or a cold-start image-store bootstrap.
 
 ## Architecture
 

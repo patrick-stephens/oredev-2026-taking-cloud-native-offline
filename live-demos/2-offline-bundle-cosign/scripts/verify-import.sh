@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Air-gapped side, from demo-bundle:
+# Air-gapped side, from live-demos/2-offline-bundle-cosign:
 # ./scripts/verify-import.sh --trusted-key /trusted/cosign.pub [--tamper]
 # cosign verify-blob --offline --insecure-ignore-tlog --key /trusted/cosign.pub \
 #   --signature metadata.sig metadata.json
@@ -32,7 +32,7 @@ banner "3 / AIR GAP: receive the archive and verify its signed inventory"
 umask 077
 work="$(mktemp -d "$DEMO_DIR/.verify.XXXXXXXX")"
 trap 'remove_workdir "$work"' EXIT
-[[ -f "$DEMO_DIR/bundle.tar.gz" ]] || die "Transport bundle.tar.gz to demo-bundle first."
+[[ -f "$DEMO_DIR/bundle.tar.gz" ]] || die "Transport bundle.tar.gz to live-demos/2-offline-bundle-cosign first."
 [[ "$(stat -c %s "$DEMO_DIR/bundle.tar.gz")" -le 1073741824 ]] ||
     die "Compressed bundle exceeds the 1 GiB application-bundle limit."
 

@@ -1,5 +1,69 @@
-/demo-bundle/keys/
-/demo-bundle/.state/
-/demo-bundle/.build.*/
-/demo-bundle/.verify.*/
-/demo-bundle/bundle*.tar.gz
+# Ignore private-key directories by default; explicitly keep public keys below.
+keys/
+# Re-open key directories so public trust keys can be included.
+!**/keys/
+# Ignore any remaining files in key directories; private key extensions stay ignored too.
+**/keys/*
+# Keep public cosign keys needed for verification.
+!**/keys/*.pub
+# Ignore private signing keys wherever a demo stores them.
+*.key
+# Ignore PKCS#12 bundles containing private credentials.
+*.p12
+# Ignore PEM-formatted private keys and generated certificates.
+*.pem
+# Ignore generated certificates, but not trust-store certificates below.
+*.crt
+# Keep trust roots intentionally shipped for offline verification.
+!**/trust-store/
+!**/trust-store/**
+# Ignore local password and token files commonly used as demo credentials.
+**/keys/password
+*.token
+tokens/
+
+# Ignore generated compressed OCI archives and Zarf package output.
+*.tar.zst
+zarf-package-*.tar.zst
+# Ignore Zarf's local package cache.
+.zarf-cache/
+# Ignore directories used to stage generated offline payloads.
+bundles/
+# Ignore generated bundle files.
+*.bundle
+# Ignore demo-created compressed transport archives.
+bundle*.tar.gz
+# Ignore local generated demo state.
+.state/
+# Ignore intermediate build directories created by demo scripts.
+.build.*/
+# Ignore intermediate verification directories created by demo scripts.
+.verify.*/
+
+# Ignore downloaded Trivy vulnerability databases.
+.trivy/
+# Ignore downloaded Grype vulnerability databases.
+grype-db/
+
+# Ignore downloaded Python wheel caches.
+wheels/
+# Ignore downloaded Debian package caches.
+debs/
+# Ignore local npm package caches.
+npm-cache/
+# Ignore vendored build dependencies generated for offline builds.
+vendor/
+
+# Ignore compiled build output.
+dist/
+# Ignore temporary work files.
+tmp/
+# Ignore generated logs.
+*.log
+# Ignore local Kubernetes credentials and cluster configuration.
+.kube/
+# Ignore local kind cluster configuration.
+kind-config.yaml
+
+# Preserve this repository's existing local ggshield cache exclusion.
+.cache_ggshield

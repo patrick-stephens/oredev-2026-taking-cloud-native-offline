@@ -36,6 +36,22 @@ pods. Agent 1 must get its missing image through a Spegel peer.
    existing cluster content; it does not eliminate the need to stage the
    cluster and its initial images.
 
+## Optional rollback beat
+
+Run with `DEMO_ROLLBACK=1 DEMO_AUTO_ADVANCE=1 ./scripts/run-demo.sh` to add a
+second proof without changing the default presentation. The connected phase
+deletes the Redis manifest from the disposable registry after agent 0 has
+seeded it. After the first air-gapped pull succeeds, the script removes agent
+1's image reference and deletes one of its Redis pods. The replacement must
+be Running, restore Redis in agent 1 containerd, increment the peer-hit metric,
+and produce Redis request logs on agent 0. Point out that the upstream registry
+tag is already 404 and the registry container is stopped.
+
+The script prints the live Prometheus scrape. A Grafana screenshot is
+intentionally not part of this self-contained demo: it would add another
+stack, images and lifecycle to provision and isolate, while the source logs
+and requester counter already show the transaction directly.
+
 ## Likely questions
 
 - **Is this a full air gap?** No. Per-node iptables rules block external

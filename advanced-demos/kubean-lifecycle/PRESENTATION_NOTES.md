@@ -7,10 +7,10 @@ node packages, images, and upgrade inputs all need to move into the enclave
 before the first node is installed. Show the lifecycle boundary, not just a
 workload that happens to keep running after disconnecting a container.
 
-This run is intentionally honest: the local sandbox cannot open its
-VirtualBox kernel device. The release-bundle prep and the VM/Kubean runbook are
-ready, but do not present the cluster lifecycle as executed unless the
-air-gapped install and upgrade have been run on an authorized VM host.
+KVM VM boot, SSH provisioning, peer connectivity, and guest NAT isolation
+were executed successfully. The release-bundle assembly and Kubean
+install/upgrade were not run; keep them marked **# UNTESTED** until both
+lifecycle operations and both httpd checks pass.
 
 ## Key beats
 
@@ -23,8 +23,8 @@ air-gapped install and upgrade have been run on an authorized VM host.
    deploying Kubernetes.
 3. **Draw the boundary.** At the AIR-GAPPED banner, detach each VM's NAT NIC.
    Demonstrate no guest default route and a failed TCP connection to
-   `1.1.1.1:443`. The static Nginx file service, registry, and host-only
-   control plane remain reachable.
+   `1.1.1.1:443`. The static Nginx file service, registry, and
+   libvirt-isolated control plane remain reachable.
 4. **Install from the older localrelease.** Apply the v0.34.2
    LocalArtifactSet, Cluster, and ClusterOperation. Verify both nodes report
    Kubernetes 1.34.7, then deploy the Apache workload from the local registry.
@@ -38,6 +38,9 @@ air-gapped install and upgrade have been run on an authorized VM host.
 
 ## Live-demo pacing
 
+- For a bundle-free KVM/network smoke, run `./scripts/run-demo.sh --vm-smoke`.
+  It restores guest NAT for the connected probe, then disconnects NAT and
+  verifies the air gap. This does not run Kubean or the httpd checks.
 - Connected download/bundle assembly: allow for the first run's large image
   and package downloads; prepare and checksum the archive before the talk if
   time is limited.
@@ -87,13 +90,12 @@ backups, workload disruption controls, a tested rollback, and review of the
 exact playbook's batching semantics.
 
 **What stays online?**  
-The management cluster and demo host remain running. Target VM NAT adapters
+The management cluster and demo host remain running. Target VM NAT interfaces
 are disconnected; Kubean jobs are restricted to the management cluster's
-private CIDRs and the target host-only subnet; local Nginx and registry remain
+private CIDRs and the libvirt isolated subnet; local Nginx and registry remain
 available. The host itself is not physically disconnected.
 
 **What is not demonstrated in this sandbox?**  
-VirtualBox is installed, but `/dev/vboxdrv` is owned by root with mode `0600`,
-and non-interactive sudo is unavailable. Therefore the VMs, Kubean cluster
-install, httpd workload, and upgrade are all marked **# UNTESTED**. The script
-does not emit a success claim for those operations.
+The management Kubernetes cluster, Kubean bundle import/install/upgrade, and
+the post-install/post-upgrade httpd checks remain **# UNTESTED**. Only the KVM
+guest lifecycle and NAT isolation boundary have been executed.

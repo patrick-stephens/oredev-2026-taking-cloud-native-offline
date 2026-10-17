@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# From demo-cache: ./scripts/verify-cache.sh
+# From live-demos/1-pull-through-cache-zot: ./scripts/verify-cache.sh
 # Freeze mutable tags before the outage, preserving the same cache volume:
 # ZOT_CONFIG=./zot-offline-config.json docker compose up -d zot
 # Only the demo namespace loses egress:

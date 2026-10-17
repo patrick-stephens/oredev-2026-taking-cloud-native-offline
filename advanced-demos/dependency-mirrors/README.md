@@ -1,15 +1,24 @@
 # Dependency mirrors: build with the network removed
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 1–2 | flask + express + go + apt pkg | pip, npm, go mod vendor, apt | 🚧 WIP |
+
+Zero-network builds for language and OS dependencies
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 Images are only half the offline problem. A normal container build may still
 download wheels, npm tarballs, Go modules or OS packages after its base image
 has been mirrored. This demo makes those build-time inputs explicit: it first
 acquires them while connected, bundles them, and then builds four small apps
 with Docker's build network set to `none`.
 
-**Offline spectrum: level 3 — dependency-complete builds from a pre-staged
-artifact bundle.** The base images and Docker engine must already be present on
-the offline builder. This is not a demo of bootstrapping Docker or acquiring
-the initial artifact bundle with no connection.
+**Catalogue spectrum: levels 1–2.** See the shared
+[offline spectrum](../../docs/offline-spectrum.md). This demo focuses on
+mirroring dependency inputs; the final builds run with networking disabled.
+The base images and Docker engine must already be present on the builder, so
+this does not demonstrate bootstrapping Docker or acquiring the initial bundle.
 
 ## Architecture
 

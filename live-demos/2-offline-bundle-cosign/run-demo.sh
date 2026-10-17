@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# From demo-bundle: ./run-demo.sh [--tamper]
+# From live-demos/2-offline-bundle-cosign: ./run-demo.sh [--tamper]
 # --tamper proves rejection first, then deploys the original signed bundle.
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

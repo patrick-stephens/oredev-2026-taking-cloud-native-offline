@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# From demo-cache: ./scripts/start-cache.sh
+# From live-demos/1-pull-through-cache-zot: ./scripts/start-cache.sh
 # Equivalent startup:
 # docker compose --profile tools pull
 # docker compose up -d zot

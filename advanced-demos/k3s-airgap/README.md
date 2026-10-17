@@ -1,5 +1,13 @@
 # Step zero: install Kubernetes without the internet
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 3–4 | whoami | k3s | 🚧 WIP |
+
+Official k3s air-gap install: never-online node running seeded images
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 An advanced companion demo for **Taking cloud-native offline**. A fresh k3s
 node boots on an internal-only Docker network, imports the official air-gap
 archive plus `traefik/whoami:v1.12.0`, and auto-deploys locally Helm-rendered
@@ -10,11 +18,8 @@ The **k0s stretch goal is also runnable** through the same orchestrator:
 `./scripts/run-demo.sh --k0s`. See [the k0s comparison](#k0s-stretch-goal-a-second-tested-offline-bootstrap)
 for its separate bundle, measured results and distribution-specific differences.
 
-**Offline spectrum: level 3 of 4 (fully disconnected platform bootstrap).**
-For this demo the scale means: 1 = caching with upstream fallback; 2 = selected
-offline workloads on an existing platform; 3 = offline platform and workload
-bootstrap; 4 = an offline operating lifecycle including upgrades, recovery,
-identity, time and supply-chain operations. This is level 3, not a claim that
+**Offline spectrum: level 3.** See the shared [offline spectrum](../../docs/offline-spectrum.md).
+This demonstrates a disconnected platform bootstrap; it does not claim that
 every day-two dependency is solved.
 
 This follows the official [k3s air-gap, manually deploy images procedure](https://docs.k3s.io/installation/airgap).

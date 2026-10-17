@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [[ -f "$ROOT/Vagrantfile" ]] && command -v vagrant >/dev/null 2>&1; then
-  (cd "$ROOT" && vagrant destroy -f)
+if command -v virsh >/dev/null 2>&1; then
+  "$ROOT/scripts/kvm.sh" destroy
 fi
 
 if command -v docker >/dev/null 2>&1; then
@@ -13,5 +13,5 @@ fi
 
 rm -f -- "$ROOT/.env"
 rm -rf -- "$ROOT/.state" "$ROOT/.work" "$ROOT/artifacts"
-printf 'Removed this demo’s VMs, local service data, and generated bundles.\n'
+printf 'Removed this demo VMs, local service data, and generated bundles.\n'
 printf 'Shared Docker images and any external Kubean management cluster were left untouched.\n'

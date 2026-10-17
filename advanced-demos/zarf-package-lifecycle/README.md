@@ -1,15 +1,21 @@
 # Zarf package lifecycle: podinfo across the air gap
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 3–4 | podinfo | zarf, k3d | 🚧 WIP |
+
+One-file packages (images + charts + git) with SBOM, deployed disconnected
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 Zarf is an **OpenSSF project**, contributed by Defense Unicorns in **June 2024**,
 not a CNCF sandbox project. This demo packages podinfo's chart, image, a file,
 Git source and generated SBOM on the connected side, then initializes and deploys
 to an egress-blocked k3d cluster.
 
-**Offline spectrum: level 3 of 4** in this repo's demo taxonomy:
-1. cached dependencies; 2. transported application bundle; 3. offline bootstrap
-of delivery services plus workload; 4. independently sustainable operations,
-including updates, identity, time, revocation, backups and recovery.
-This demonstrates level 3, not a fully autonomous level-4 environment.
+**Offline spectrum: level 3.** Use the shared [offline spectrum](../../docs/offline-spectrum.md)
+as the definition of levels. This demo reaches a prepared disconnected runtime;
+it does not claim a fully autonomous supply chain or lifecycle.
 
 ## Architecture
 

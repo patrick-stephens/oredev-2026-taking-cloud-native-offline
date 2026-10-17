@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# From demo-cache: ./scripts/prime-cache.sh
+# From live-demos/1-pull-through-cache-zot: ./scripts/prime-cache.sh
 # The client executes:
 # skopeo copy --src-tls-verify=false \
 #   docker://localhost:5000/nginx:latest dir:/tmp/nginx-online

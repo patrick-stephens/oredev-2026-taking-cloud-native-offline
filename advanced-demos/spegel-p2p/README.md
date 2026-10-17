@@ -1,5 +1,13 @@
 # Spegel: peer-to-peer image distribution in k3d
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 3 | redis | spegel, k3d, zot | 🚧 WIP |
+
+Nodes fetch images from each other with the central registry down
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 Spegel makes each Kubernetes node a stateless local OCI registry mirror. This
 demo begins with a single copy of the official Redis Alpine image on agent 0,
 then stops the registry and schedules three `Always`-pull replicas across both
@@ -8,9 +16,9 @@ to Docker Hub or any other internet registry.
 
 ## Offline spectrum
 
-**Level 2–3: cluster-internal distribution.** The nodes share image content
-inside the cluster, so new nodes can consume a cached image without a central
-registry. This does not provision a new cluster or its tools in an air gap.
+**Offline spectrum: level 3.** See the shared [offline spectrum](../../docs/offline-spectrum.md).
+This demo proves cluster-internal image distribution, not provisioning a new
+cluster or its tools in an air gap.
 
 Without Spegel, agent 1 has no image and cannot reach the stopped registry.
 Its pull fails and the pod enters `ImagePullBackOff`.
@@ -76,6 +84,16 @@ is interactive, and pauses briefly after banners. It cleans up on success,
 failure, Ctrl-C or termination. The Redis Deployment is constrained to the two
 agent nodes and topology-spread so three replicas necessarily place at least
 one pod on each agent.
+
+The optional registry rollback and second-pull check can be enabled without
+changing the default run:
+
+```bash
+DEMO_ROLLBACK=1 DEMO_AUTO_ADVANCE=1 ./scripts/run-demo.sh
+```
+
+This enables manifest deletion only on the throwaway local registry created
+for this demo. It does not delete or modify Docker Hub content.
 
 ### CONNECTED phase
 
@@ -143,6 +161,40 @@ blobs in agent 0's Spegel logs, with the requesting pod IP on agent 1's peer
 traffic. The requester recorded a `cache="hit"` metric.
 `TOTAL RUNTIME` is printed after cleanup. Run `./scripts/cleanup.sh` separately
 if setup was interrupted before the orchestrator installed its exit trap.
+
+### Optional rollback exercise
+
+With `DEMO_ROLLBACK=1`, the connected phase deletes the Redis manifest from
+the disposable registry after agent 0 has pulled it, then verifies the
+`alpine` tag returns HTTP 404. The ordinary air-gapped deployment therefore
+already proves a fresh agent-1 pull succeeds with no registry copy. After that
+baseline evidence, the script synchronously removes agent 1's Redis image
+reference and deletes one of its running Redis pods. The Deployment controller
+recreates it; the check requires the replacement to run, Redis to return to
+agent 1's containerd image list, the agent-1 peer-hit metric to increase, and
+agent 0's Spegel logs to show Redis manifest/blob requests for the retry.
+
+Expected additional evidence:
+
+```text
+ROLLBACK SETUP: deleted registry manifest sha256:...; alpine now returns HTTP 404.
+ROLLBACK PASS: redis-peer-demo-... replaced redis-peer-demo-... on node B; peer hits 10 -> 11.
+```
+
+The image is removed only from the disposable demo registry and agent 1; agent
+0 remains the peer source throughout. The default run does not enable registry
+deletion or perform the extra pull.
+
+### Metrics snapshot
+
+The default run prints the requester metrics directly from Spegel's
+Prometheus endpoint, along with the source peer's request logs. In this setup
+that live scrape is the most direct evidence and avoids adding Grafana,
+Prometheus, extra images, and their own air-gap and lifecycle requirements.
+No dashboard screenshot is bundled. For a presentation, the printed
+`spegel_mirror_requests_total{cache="hit",registry="registry:5000"}` counter
+is the key metric; with rollback enabled, compare its before/after values to
+show the retry was served again.
 
 ## Troubleshooting
 
@@ -239,7 +291,9 @@ Test date: **2026-10-16**.
 - Redis **docker.io/library/redis:alpine**, resolved during the test to
   `sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0`
 
-Validated end-to-end in **57 seconds**, including cleanup. All three pods
-reached `Running`, including two on agent 1; agent 1's containerd gained Redis
-with the registry stopped, all node and pod egress probes were blocked, and
-Spegel reported peer mirror hits.
+Validated end-to-end in **62 seconds** for the default run and **61 seconds**
+with the optional rollback exercise, including cleanup. All three pods
+reached `Running`; agent 1's containerd gained Redis with the registry stopped,
+all node and pod egress probes were blocked, and Spegel reported peer mirror
+hits. The rollback run deleted the registry tag (verified HTTP 404), recreated
+a pod on agent 1, and increased its peer-hit count from 10 to 11.

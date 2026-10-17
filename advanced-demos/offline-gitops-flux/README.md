@@ -1,5 +1,13 @@
 # Offline GitOps with Flux, Gitea and Podinfo
 
+| Spectrum level | Demo app | Headline tooling | Status |
+|----------------|----------|------------------|--------|
+| 3 | podinfo | flux, gitea, git bundle | 🚧 WIP |
+
+Full GitOps loop (push → reconcile → deploy) inside the boundary
+
+[Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
+
 This demo tests the missing half of offline GitOps: how a Git change crosses
 the boundary after the hosted Git provider disappears. Flux reads from local
 Gitea, the chart and workload image come from a local OCI registry, and a Git
@@ -7,11 +15,10 @@ bundle carries an update into Gitea while the cluster has no Internet route.
 The app is [Podinfo](https://github.com/stefanprodan/podinfo), deployed using
 its Helm chart and a Flux `HelmRelease`.
 
-**Offline spectrum level: 4 — reconciliation and update delivery work inside
-the isolated boundary.** This is a container/cluster isolation simulation on a
-connected Linux host, not a physically disconnected machine. The host is the
-operator/transfer station and remains online; Docker containers and the kind
-node are isolated on an internal-only network.
+**Offline spectrum: level 3.** See the shared [offline spectrum](../../docs/offline-spectrum.md).
+Reconciliation and update delivery work inside the isolated boundary. This is
+a container/cluster isolation simulation on a connected Linux host, not a
+physically disconnected machine; the host remains the operator/transfer station.
 
 ## Architecture
 

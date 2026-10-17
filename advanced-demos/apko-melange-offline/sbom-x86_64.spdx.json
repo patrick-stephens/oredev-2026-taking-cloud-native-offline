@@ -1,9 +1,9 @@
 {
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "sbom-sha256:0309fa61efa8ced13c6f597635bcf5a304a935dc55aa5d0608507af29a07816e",
+  "name": "sbom-sha256:409811ae5e3e80b8256cdfa907d31129743539cd1572622f82c208f7b0a8b75f",
   "spdxVersion": "SPDX-2.3",
   "creationInfo": {
-    "created": "1970-01-01T00:00:00Z",
+    "created": "2026-04-10T15:36:12Z",
     "creators": [
       "Tool: apko (v1.4.11)",
       "Organization: Chainguard, Inc"
@@ -13,13 +13,13 @@
   "dataLicense": "CC0-1.0",
   "documentNamespace": "https://spdx.org/spdxdocs/apko/",
   "documentDescribes": [
-    "SPDXRef-Package-Image-sha256-ab854453645011b6010ab52ea5627bde24124a60afbd19e9091a36c20b55cf46"
+    "SPDXRef-Package-Image-sha256-cde6fb5194fa01aa29f505fad319635f285ca53ce764d6891229438b4f803a89"
   ],
   "packages": [
     {
-      "SPDXID": "SPDXRef-Package-Image-sha256-ab854453645011b6010ab52ea5627bde24124a60afbd19e9091a36c20b55cf46",
-      "name": "sha256:ab854453645011b6010ab52ea5627bde24124a60afbd19e9091a36c20b55cf46",
-      "versionInfo": "sha256:ab854453645011b6010ab52ea5627bde24124a60afbd19e9091a36c20b55cf46",
+      "SPDXID": "SPDXRef-Package-Image-sha256-cde6fb5194fa01aa29f505fad319635f285ca53ce764d6891229438b4f803a89",
+      "name": "sha256:cde6fb5194fa01aa29f505fad319635f285ca53ce764d6891229438b4f803a89",
+      "versionInfo": "sha256:cde6fb5194fa01aa29f505fad319635f285ca53ce764d6891229438b4f803a89",
       "filesAnalyzed": false,
       "description": "apko container image",
       "downloadLocation": "NOASSERTION",
@@ -28,20 +28,20 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "ab854453645011b6010ab52ea5627bde24124a60afbd19e9091a36c20b55cf46"
+          "checksumValue": "cde6fb5194fa01aa29f505fad319635f285ca53ce764d6891229438b4f803a89"
         }
       ],
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
-          "referenceLocator": "pkg:oci/offline-go-server@sha256:ab854453645011b6010ab52ea5627bde24124a60afbd19e9091a36c20b55cf46?arch=amd64\u0026mediaType=application%2Fvnd.oci.image.manifest.v1%2Bjson\u0026os=linux",
+          "referenceLocator": "pkg:oci/offline-greeter@sha256:cde6fb5194fa01aa29f505fad319635f285ca53ce764d6891229438b4f803a89?arch=amd64\u0026mediaType=application%2Fvnd.oci.image.manifest.v1%2Bjson\u0026os=linux",
           "referenceType": "purl"
         }
       ]
     },
     {
-      "SPDXID": "SPDXRef-Package-ImageLayer-sha256-0309fa61efa8ced13c6f597635bcf5a304a935dc55aa5d0608507af29a07816e",
-      "name": "sha256:0309fa61efa8ced13c6f597635bcf5a304a935dc55aa5d0608507af29a07816e",
+      "SPDXID": "SPDXRef-Package-ImageLayer-sha256-409811ae5e3e80b8256cdfa907d31129743539cd1572622f82c208f7b0a8b75f",
+      "name": "sha256:409811ae5e3e80b8256cdfa907d31129743539cd1572622f82c208f7b0a8b75f",
       "versionInfo": "unknown",
       "filesAnalyzed": false,
       "description": "apko operating system layer",
@@ -51,7 +51,7 @@
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
-          "referenceLocator": "pkg:oci/offline-go-server@sha256:0309fa61efa8ced13c6f597635bcf5a304a935dc55aa5d0608507af29a07816e?arch=amd64\u0026mediaType=application%2Fvnd.oci.image.layer.v1.tar%2Bgzip\u0026os=linux",
+          "referenceLocator": "pkg:oci/offline-greeter@sha256:409811ae5e3e80b8256cdfa907d31129743539cd1572622f82c208f7b0a8b75f?arch=amd64\u0026mediaType=application%2Fvnd.oci.image.layer.v1.tar%2Bgzip\u0026os=linux",
           "referenceType": "purl"
         }
       ]
@@ -67,12 +67,75 @@
       "primaryPackagePurpose": "OPERATING_SYSTEM"
     },
     {
-      "SPDXID": "SPDXRef-Package-apk-offline-go-server-0.1.0-r0",
-      "name": "offline-go-server",
-      "versionInfo": "0.1.0-r0",
+      "SPDXID": "SPDXRef-Package-musl-1.2.5-r12",
+      "name": "musl",
+      "versionInfo": "1.2.5-r12",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "Apache-2.0",
+      "licenseDeclared": "MIT",
+      "description": "the musl c library (libc) implementation",
+      "downloadLocation": "NOASSERTION",
+      "originator": "Organization: apko-generated image",
+      "supplier": "Organization: apko-generated image",
+      "sourceInfo": "Package info from apk database",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:apk/unknown/musl@1.2.5-r12?arch=x86_64",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-busybox-1.37.0-r20",
+      "name": "busybox",
+      "versionInfo": "1.37.0-r20",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "GPL-2.0-only",
+      "description": "Size optimized toolbox of many common UNIX utilities",
+      "downloadLocation": "NOASSERTION",
+      "originator": "Organization: apko-generated image",
+      "supplier": "Organization: apko-generated image",
+      "sourceInfo": "Package info from apk database",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:apk/unknown/busybox@1.37.0-r20?arch=x86_64",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-busybox-binsh-1.37.0-r20",
+      "name": "busybox-binsh",
+      "versionInfo": "1.37.0-r20",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "GPL-2.0-only",
+      "description": "busybox ash /bin/sh",
+      "downloadLocation": "NOASSERTION",
+      "originator": "Organization: apko-generated image",
+      "supplier": "Organization: apko-generated image",
+      "sourceInfo": "Package info from apk database",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceLocator": "pkg:apk/unknown/busybox-binsh@1.37.0-r20?arch=noarch",
+          "referenceType": "purl"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-apk-offline-greeter-1.0.0-r0",
+      "name": "offline-greeter",
+      "versionInfo": "1.0.0-r0",
+      "filesAnalyzed": false,
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
       "downloadLocation": "NOASSERTION",
       "originator": "Organization: Unknown",
       "supplier": "Organization: Unknown",
@@ -81,7 +144,7 @@
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
-          "referenceLocator": "pkg:apk/unknown/offline-go-server@0.1.0-r0?arch=x86_64",
+          "referenceLocator": "pkg:apk/unknown/offline-greeter@1.0.0-r0?arch=x86_64",
           "referenceType": "purl"
         }
       ]
@@ -108,19 +171,34 @@
   ],
   "relationships": [
     {
-      "spdxElementId": "SPDXRef-Package-Image-sha256-ab854453645011b6010ab52ea5627bde24124a60afbd19e9091a36c20b55cf46",
+      "spdxElementId": "SPDXRef-Package-Image-sha256-cde6fb5194fa01aa29f505fad319635f285ca53ce764d6891229438b4f803a89",
       "relationshipType": "CONTAINS",
-      "relatedSpdxElement": "SPDXRef-Package-ImageLayer-sha256-0309fa61efa8ced13c6f597635bcf5a304a935dc55aa5d0608507af29a07816e"
+      "relatedSpdxElement": "SPDXRef-Package-ImageLayer-sha256-409811ae5e3e80b8256cdfa907d31129743539cd1572622f82c208f7b0a8b75f"
     },
     {
-      "spdxElementId": "SPDXRef-Package-apk-offline-go-server-0.1.0-r0",
+      "spdxElementId": "SPDXRef-Package-Image-sha256-cde6fb5194fa01aa29f505fad319635f285ca53ce764d6891229438b4f803a89",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-musl-1.2.5-r12"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-Image-sha256-cde6fb5194fa01aa29f505fad319635f285ca53ce764d6891229438b4f803a89",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-busybox-1.37.0-r20"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-Image-sha256-cde6fb5194fa01aa29f505fad319635f285ca53ce764d6891229438b4f803a89",
+      "relationshipType": "CONTAINS",
+      "relatedSpdxElement": "SPDXRef-Package-busybox-binsh-1.37.0-r20"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-apk-offline-greeter-1.0.0-r0",
       "relationshipType": "DESCRIBED_BY",
       "relatedSpdxElement": "SPDXRef-Package-Melange--tmp-work-config-melange.yaml-unknown"
     },
     {
-      "spdxElementId": "SPDXRef-Package-Image-sha256-ab854453645011b6010ab52ea5627bde24124a60afbd19e9091a36c20b55cf46",
+      "spdxElementId": "SPDXRef-Package-Image-sha256-cde6fb5194fa01aa29f505fad319635f285ca53ce764d6891229438b4f803a89",
       "relationshipType": "CONTAINS",
-      "relatedSpdxElement": "SPDXRef-Package-apk-offline-go-server-0.1.0-r0"
+      "relatedSpdxElement": "SPDXRef-Package-apk-offline-greeter-1.0.0-r0"
     }
   ]
 }

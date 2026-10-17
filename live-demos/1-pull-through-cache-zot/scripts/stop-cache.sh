@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# From demo-cache: ./scripts/stop-cache.sh
+# From live-demos/1-pull-through-cache-zot: ./scripts/stop-cache.sh
 # Equivalent: docker compose --profile tools down --remove-orphans
 # For an explicitly destructive cold reset: ./scripts/stop-cache.sh --purge
 # Equivalent: docker compose --profile tools down --remove-orphans --volumes

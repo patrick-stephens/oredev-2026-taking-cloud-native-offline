@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# From demo-bundle: ./scripts/cleanup.sh
+# From live-demos/2-offline-bundle-cosign: ./scripts/cleanup.sh
 # Removes only this demo's Kubernetes cluster, labeled registry storage/network.
 # Preserves bundle.tar.gz and ignored keys/ for transport and repeat runs.
 set -euo pipefail

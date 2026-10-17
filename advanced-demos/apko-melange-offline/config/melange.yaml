@@ -1,27 +1,27 @@
 package:
-  name: offline-go-server
-  version: "0.1.0"
+  name: offline-greeter
+  version: "1.0.0"
   epoch: 0
-  description: "Static Go HTTP server built from staged APK packages"
-  copyright:
-    - license: Apache-2.0
+  description: "A small demo package assembled without network access"
+  dependencies:
+    runtime:
+      - busybox-binsh
 
 environment:
   contents:
     repositories:
-      - /tmp/work/artifacts/apk-repo/main
-      - /tmp/work/artifacts/apk-repo/community
+      - "@alpine /tmp/work/artifacts/offline-greeter/apk-repo/alpine"
     packages:
-      - go
-      - busybox-binsh
-      - busybox
-      - musl
+      - busybox-binsh@alpine
+      - busybox@alpine
+      - musl@alpine
 
 pipeline:
-  - name: Build the static Go HTTP server
+  - name: Install the offline greeting
     runs: |
       mkdir -p "${{targets.destdir}}/usr/bin"
-      GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local CGO_ENABLED=0 \
-        GOOS=linux GOARCH=amd64 \
-        go build -trimpath -ldflags="-s -w -buildid=" \
-        -o "${{targets.destdir}}/usr/bin/offline-go-server" .
+      cat > "${{targets.destdir}}/usr/bin/offline-greeter" <<'EOF'
+      #!/bin/sh
+      printf '%s\n' 'hello from an APK built and assembled with no network'
+      EOF
+      chmod 0755 "${{targets.destdir}}/usr/bin/offline-greeter"
