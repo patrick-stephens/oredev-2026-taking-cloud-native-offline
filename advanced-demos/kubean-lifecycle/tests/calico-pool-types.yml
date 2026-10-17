@@ -1,0 +1,25 @@
+---
+- name: Check the existing Calico IPPool keeps its numeric block size
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    existing_pool:
+      spec:
+        blockSize: 26
+    block_size:
+      spec:
+        blockSize: "{{ existing_pool.spec.blockSize }}"
+    merged_pool: "{{ existing_pool | combine(block_size, recursive=True) }}"
+  tasks:
+    - name: Reproduce the bundled task's integer-to-string coercion
+      ansible.builtin.assert:
+        that:
+          - (merged_pool | to_json | from_json).spec.blockSize is string
+    - name: Assert the corrected serialization preserves the immutable integer
+      vars:
+        serialized_pool: "{{ merged_pool | combine(dict(spec=dict(blockSize=merged_pool.spec.blockSize | int)), recursive=True) | to_json | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - serialized_pool.spec.blockSize is integer
+          - serialized_pool.spec.blockSize == 26

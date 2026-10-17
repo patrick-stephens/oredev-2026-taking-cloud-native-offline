@@ -98,10 +98,11 @@ docker pull "$HTTPD_IMAGE"
 docker pull "$BUSYBOX_IMAGE"
 docker pull "$REGISTRY_IMAGE"
 docker pull "$FILES_IMAGE"
+docker pull "quay.io/podman/stable:v$PODMAN_IMPORT_VERSION"
 docker image save --output "$ARTIFACTS/httpd-offline.tar" "$HTTPD_IMAGE"
 docker image save --output "$ARTIFACTS/busybox-offline.tar" "$BUSYBOX_IMAGE"
 docker image save --output "$ARTIFACTS/artifact-services.tar" \
-  "$REGISTRY_IMAGE" "$FILES_IMAGE"
+  "$REGISTRY_IMAGE" "$FILES_IMAGE" "quay.io/podman/stable:v$PODMAN_IMPORT_VERSION"
 httpd_repo_digest="$(docker image inspect "$HTTPD_IMAGE" --format '{{index .RepoDigests 0}}')"
 httpd_digest="${httpd_repo_digest##*@}"
 if [[ ! "$httpd_repo_digest" =~ (^|/)httpd@sha256:[[:xdigit:]]{64}$ ]] ||

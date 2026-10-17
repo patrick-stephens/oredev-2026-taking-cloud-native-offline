@@ -198,44 +198,66 @@ restore_nat() {
   done
 }
 
+connect_external_egress() {
+  local node address
+  restore_nat
+  for node in cp1 worker1; do
+    wait_for_ssh "$node"
+    address="$(guest_ip "$node")"
+    ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
+      -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
+      "vagrant@$address" 'sudo bash -s' <<'REMOTE'
+set -euo pipefail
+if systemctl cat kubean-airgap.service >/dev/null 2>&1; then
+  systemctl disable --now kubean-airgap.service
+fi
+for table in iptables ip6tables; do
+  for hook in OUTPUT FORWARD; do
+    chain="KUBEAN-AIRGAP-$hook"
+    if "$table" -w -nL "$chain" >/dev/null 2>&1; then
+      while "$table" -w -C "$hook" -j "$chain" 2>/dev/null; do
+        "$table" -w -D "$hook" -j "$chain"
+      done
+      "$table" -w -F "$chain"
+      "$table" -w -X "$chain"
+    fi
+  done
+done
+REMOTE
+    printf 'CONNECTED: removed only demo egress filters on %s.\n' "$node"
+  done
+}
+
 isolate_external_egress() {
   local node address
   for node in cp1 worker1; do
     address="$(guest_ip "$node")"
     ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
       -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
+      "vagrant@$address" \
+      'sudo install -m 0755 /dev/stdin /usr/local/sbin/kubean-airgap' \
+      < "$ROOT/config/guest-egress.sh"
+    ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
+      -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
       "vagrant@$address" 'sudo bash -s' <<'REMOTE'
 set -euo pipefail
+cat > /etc/systemd/system/kubean-airgap.service <<'UNIT'
+[Unit]
+Description=Kubean demo external-egress filter
+Before=network-pre.target kubelet.service
+Wants=network-pre.target
 
-ensure_chain() {
-  local chain="$1"
-  iptables -N "$chain" 2>/dev/null || true
-  iptables -F "$chain"
-}
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kubean-airgap
+RemainAfterExit=yes
 
-ensure_chain KUBEAN-AIRGAP-OUTPUT
-iptables -A KUBEAN-AIRGAP-OUTPUT -o lo -j RETURN
-iptables -A KUBEAN-AIRGAP-OUTPUT -p udp --sport 68 --dport 67 -j RETURN
-iptables -A KUBEAN-AIRGAP-OUTPUT -d 10.0.0.0/8 -j RETURN
-iptables -A KUBEAN-AIRGAP-OUTPUT -d 172.16.0.0/12 -j RETURN
-iptables -A KUBEAN-AIRGAP-OUTPUT -d 192.168.0.0/16 -j RETURN
-iptables -A KUBEAN-AIRGAP-OUTPUT -j REJECT
-iptables -C OUTPUT -j KUBEAN-AIRGAP-OUTPUT 2>/dev/null ||
-  iptables -I OUTPUT 1 -j KUBEAN-AIRGAP-OUTPUT
-
-ensure_chain KUBEAN-AIRGAP-FORWARD
-iptables -A KUBEAN-AIRGAP-FORWARD -s 10.0.0.0/8 -d 10.0.0.0/8 -j RETURN
-iptables -A KUBEAN-AIRGAP-FORWARD -s 10.0.0.0/8 -d 172.16.0.0/12 -j RETURN
-iptables -A KUBEAN-AIRGAP-FORWARD -s 10.0.0.0/8 -d 192.168.0.0/16 -j RETURN
-iptables -A KUBEAN-AIRGAP-FORWARD -s 172.16.0.0/12 -d 10.0.0.0/8 -j RETURN
-iptables -A KUBEAN-AIRGAP-FORWARD -s 172.16.0.0/12 -d 172.16.0.0/12 -j RETURN
-iptables -A KUBEAN-AIRGAP-FORWARD -s 172.16.0.0/12 -d 192.168.0.0/16 -j RETURN
-iptables -A KUBEAN-AIRGAP-FORWARD -s 192.168.0.0/16 -d 10.0.0.0/8 -j RETURN
-iptables -A KUBEAN-AIRGAP-FORWARD -s 192.168.0.0/16 -d 172.16.0.0/12 -j RETURN
-iptables -A KUBEAN-AIRGAP-FORWARD -s 192.168.0.0/16 -d 192.168.0.0/16 -j RETURN
-iptables -A KUBEAN-AIRGAP-FORWARD -j REJECT
-iptables -C FORWARD -j KUBEAN-AIRGAP-FORWARD 2>/dev/null ||
-  iptables -I FORWARD 1 -j KUBEAN-AIRGAP-FORWARD
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable kubean-airgap.service
+systemctl restart kubean-airgap.service
 REMOTE
     printf 'Installed idempotent external-egress filters on %s.\n' "$node"
   done
@@ -282,10 +304,14 @@ check_isolation() {
     fi
     ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
       -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
-      "vagrant@$address" \
-      'curl --fail --silent --show-error --connect-timeout 5 http://192.168.56.1:8080/kubean/ubuntu/v0.34.2/Packages.gz -o /dev/null' ||
-      fail "$node cannot reach the private local artifact service"
-    printf 'Expected isolation: %s retains its private route, reaches local artifacts, and cannot reach public probes.\n' "$node"
+      "vagrant@$address" 'sudo systemctl is-enabled --quiet kubean-airgap.service &&
+        sudo systemctl is-active --quiet kubean-airgap.service &&
+        sudo iptables -w -C OUTPUT -j KUBEAN-AIRGAP-OUTPUT >/dev/null &&
+        sudo iptables -w -C FORWARD -j KUBEAN-AIRGAP-FORWARD >/dev/null &&
+        sudo ip6tables -w -C OUTPUT -j KUBEAN-AIRGAP-OUTPUT >/dev/null &&
+        sudo ip6tables -w -C FORWARD -j KUBEAN-AIRGAP-FORWARD >/dev/null' ||
+      fail "$node does not have persistent IPv4/IPv6 egress filters"
+    printf 'Expected isolation: %s retains its private route and cannot reach public probes; filters persist across boot.\n' "$node"
   done
 }
 
@@ -308,12 +334,13 @@ destroy() {
 
 case "${1:-}" in
   up) up ;;
+  connect-egress) connect_external_egress ;;
   check-connected) check_connected ;;
   isolate-egress) isolate_external_egress ;;
   check-isolation) check_isolation ;;
   destroy) destroy ;;
   *)
-    echo "Usage: $0 {up|check-connected|isolate-egress|check-isolation|destroy}" >&2
+    echo "Usage: $0 {up|connect-egress|check-connected|isolate-egress|check-isolation|destroy}" >&2
     exit 2
     ;;
 esac

@@ -22,7 +22,8 @@ Kubernetes 1.35.5.
    worker VM. Kubean reaches them over SSH and provisions OS packages before
    deploying Kubernetes.
 3. **Draw the boundary.** At the AIR-GAPPED banner, keep the private lab route
-   but install guest-local iptables rules that reject non-RFC1918 egress.
+   but enable a persistent guest-local firewall allowing only the lab and
+   target Kubernetes CIDRs, plus loopback and IPv4 DHCP.
    Demonstrate failed public IPv4/IPv6 TCP probes while the static Nginx file
    service, registry, and libvirt-isolated control plane remain reachable.
 4. **Install from the older localrelease.** Apply the v0.34.2
@@ -49,6 +50,12 @@ Kubernetes 1.35.5.
   logs visible. Do not fake or skip readiness waits.
 - Upgrade: budget several minutes; watch the Kubean `ClusterOperation` and
   confirm the workload before and after.
+- For repeat verification, use `./scripts/run-demo.sh --verify-only`.
+  For full playbook reconciliation without reinstalling the older version,
+  use `./scripts/run-demo.sh --offline --reconcile-upgrade`.
+- The [expected transcript](./README.md#expected-transcript) is illustrative,
+  not a prerecorded success log. On an already-upgraded target, explicitly
+  explain why installation is skipped; do not narrate a fresh installation.
 - Keep the expected-response check simple: `curl
   http://192.168.56.12:30080/` should return Apache's default page.
 - Reset with `scripts/cleanup.sh` only after capturing logs or metrics needed
@@ -99,7 +106,21 @@ not physically disconnected.
 
 **What is the biggest caveat?**
 The management Kubernetes cluster is still a prerequisite rather than something
-the demo bootstraps from zero. Also, the validated upgrade path skips Kubespray's
-network role because the bundled Calico reconciliation task misrenders the
-existing immutable IPPool `blockSize` as a string; the cluster still upgrades
-correctly because Calico is already healthy and unchanged.
+the demo bootstraps from zero. The pinned spray-job also needs a guarded,
+Job-local correction for Calico's integer JSON serialization. Network
+reconciliation now runs: the pool task completed successfully in a full
+reconciliation on 2026-10-17. Do not describe the earlier broad network-tag
+skip as the current solution.
+
+**How long and how much storage?**
+Earlier measured lifecycle components totaled 24m58s, excluding boot, probes,
+pauses, failed attempts, and debugging. The full-network reconciliation took
+3m23s. The hardened offline resume including imports and reconciliation took
+9m18s; verify-only took 2m10s. Each invocation prints actual elapsed runtime.
+The demo directory consumed about 41 GiB before shared Docker storage;
+recommend at least 60 GiB free, preferably 80 GiB or more. A transfer archive
+size is not a working-space estimate.
+
+**Was the hardened script rerun from empty VM disks?**
+Not without explicit reset approval. Preserve the running cluster and describe
+verification/resume testing separately from a clean-room install.

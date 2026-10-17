@@ -46,7 +46,7 @@ done
 printf 'deb [trusted=yes] %s ./\n' "$repo_url" > /etc/apt/sources.list
 printf 'Acquire::Languages "none";\n' > /etc/apt/apt.conf.d/99kubean-demo
 apt-get clean
-apt-get -o Acquire::Languages=none update
+apt-get -o Acquire::Languages=none -o APT::Update::Error-Mode=any update
 REMOTE
   printf 'Configured %s to use the %s local Ubuntu repository.\n' "$address" "$version"
 done

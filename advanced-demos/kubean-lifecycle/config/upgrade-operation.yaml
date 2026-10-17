@@ -9,4 +9,10 @@ spec:
   image: ghcr.io/kubean-io/spray-job:v0.39.2
   actionType: playbook
   action: upgrade-cluster.yml
-  extraArgs: --skip-tags=network
+  preHook:
+    - actionType: shell
+      action: |
+        calico_task=/kubespray/roles/network_plugin/calico/tasks/install.yml
+        test "$(grep -Fc 'stdin: "{{ _calico_pool_merged | to_json }}"' "$calico_task")" -eq 1
+        sed -i 's/_calico_pool_merged | to_json/_calico_pool_merged | combine(dict(spec=dict(blockSize=_calico_pool_merged.spec.blockSize | int)), recursive=True) | to_json/' "$calico_task"
+        echo 'Applied pinned Calico IPPool integer-serialization correction; network tasks remain enabled.'
