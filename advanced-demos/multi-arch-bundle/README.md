@@ -2,7 +2,7 @@
 
 | Spectrum level | Demo app | Headline tooling | Status |
 |----------------|----------|------------------|--------|
-| 2–3 | busybox (+ custom arm64 build) | skopeo --all, buildx, QEMU | 🚧 WIP |
+| 2–3 | BusyBox (+ custom arm64 build) | Skopeo `--multi-arch all`, Buildx, QEMU | Docker/QEMU baseline verified; k3d stretch `# UNTESTED` |
 
 Architecture-portable bundles (amd64 + arm64)
 
@@ -76,7 +76,7 @@ configure Docker daemon-wide insecure registries, TLS, or authentication.
 
 ## Tested with
 
-Tested on **2026-10-16**, Linux amd64:
+Tested on **2026-10-17**, Linux amd64:
 
 | Component | Version / reference |
 |---|---|
@@ -88,6 +88,7 @@ Tested on **2026-10-16**, Linux amd64:
 | QEMU/binfmt installer | `tonistiigi/binfmt:qemu-v8.1.5` |
 | Go build stage | `golang:1.23.5-alpine3.21` |
 | Registry-verified app image | Official `docker.io/library/busybox:stable` |
+| k3d stretch investigation | k3d v5.9.0; k3s `v1.35.5+k3s1` (not a passing demo test) |
 
 `busybox:stable` is deliberately a moving tag, not a reproducible pin. Each run
 captures the resolved index in `artifacts/upstream-index.json`; its raw-file
@@ -255,12 +256,18 @@ success-shaped fallbacks.
 
 ## Known limitations
 
-- **# UNTESTED — k3d multi-architecture agent node.** This demo does not create
-  a k3d cluster or validate a mixed-architecture k3d agent. The verified
-  portability proof is Docker's `--platform linux/arm64` execution under
-  QEMU/binfmt. Add a k3d agent only after confirming the host's architecture,
-  k3d node image/platform support, and that the node can read the complete
-  index with no uplink.
+- **# UNTESTED — k3d multi-architecture agent workload.** The k3d v5.9.0
+  investigation confirmed that an ARM64 k3s image can be supplied to
+  `k3d node create` using a separate platform-specific image tag. With
+  `K3D_FIX_DNS=false`, the agent briefly registered and reported
+  `kubernetes.io/arch=arm64`, but its kube-proxy then exited because this
+  amd64 sandbox's QEMU/kernel combination reports
+  `iptables: Failed to initialize nft: Protocol not supported`. The agent
+  never reached stable Ready or ran a workload, so the mixed-cluster stretch
+  remains untested. The verified portability proof is Docker's
+  `--platform linux/arm64` execution under QEMU/binfmt. Repeat the k3d test on
+  native ARM64 nodes or a host whose kernel supports the required iptables
+  operations before promoting this stretch.
 - zot is an amd64 local registry container. Its server architecture is
   independent from the architectures represented in its OCI catalog.
 - QEMU user-mode emulation proves that this arm64 binary starts and behaves

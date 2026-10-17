@@ -27,8 +27,10 @@ registry's uplink and run the ARM64 workload from its staged image.
    evidence, then show amd64 `x86_64`, arm64 `aarch64`, and the server's HTTP
    self-test with `--network none`.
 7. **Close honestly.** The Docker host is not physically unplugged, and QEMU
-   is not native ARM performance. The k3d multi-arch agent stretch is
-   `# UNTESTED`.
+   is not native ARM performance. The k3d stretch remains `# UNTESTED`: this
+   sandbox's emulated agent registered as arm64 but kube-proxy exited because
+   the QEMU/kernel combination does not support the required nftables
+   iptables operation.
 
 ## Presenter controls
 
@@ -64,5 +66,9 @@ image metadata is checked, and Docker runs it with `--platform linux/arm64`.
 The self-test makes an HTTP request to the server over loopback and checks the
 body. On this amd64 host that requires QEMU/binfmt; it is not a benchmark.
 
-**Why not show k3d?** The multi-arch k3d agent-node extension is outside the
-verified baseline and remains `# UNTESTED`; no cluster result is implied.
+**Why not show k3d?** The mixed-architecture agent was investigated with
+k3d v5.9.0 and k3s `v1.35.5+k3s1`. The ARM64 agent registered briefly when
+`K3D_FIX_DNS=false` bypassed k3d's DNS-fix script, but kube-proxy then failed
+with `iptables: Failed to initialize nft: Protocol not supported`. It never
+stayed Ready or ran a workload, so no successful mixed-cluster result is
+claimed; this stretch needs a native ARM64 or compatible kernel test.
