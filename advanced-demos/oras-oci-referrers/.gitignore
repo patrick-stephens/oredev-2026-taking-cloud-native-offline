@@ -5,3 +5,4 @@ keys/
 *.pem
 *.crt
 *.p12
+*.pub

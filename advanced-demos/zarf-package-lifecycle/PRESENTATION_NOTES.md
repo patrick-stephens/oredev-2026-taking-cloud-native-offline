@@ -13,10 +13,12 @@ Zarf is an OpenSSF project contributed by Defense Unicorns in June 2024.
    reading logs. The tools and matching init archive are infrastructure assets.
 2. Show `zarf-config.yaml`. Three external sources, one package; no `image.registry`
    override. The Git ref is a commit, not a mutable branch.
-3. Show the built-in SBOM count. Inventory is not vulnerability assessment.
+3. Show the built-in SBOM count and package signature. Enroll the public key
+   separately; signing authenticates the package, not vulnerability freedom.
 4. At isolation, point out the deliberate external HTTP failure. All subsequent
    CLI commands run inside the blocked node; an online host cannot mask misses.
-5. Explain the injector chicken-and-egg problem while init runs: ConfigMaps,
+5. Point out successful offline signature verification before init. Explain
+   the injector chicken-and-egg problem while init runs: ConfigMaps,
    cached infrastructure image, temporary seed registry, permanent registry.
 6. Show `before-describe.txt` versus `after-describe.txt`. Inspect **the pod**:
    the Deployment template can still reference GHCR. Admission mutation changes
@@ -41,8 +43,15 @@ Scripts clear between phases and sleep one second, but never fabricate success.
 - **Why no NetworkPolicy alone?** Host-network processes, containerd and the
   Zarf CLI are also dependencies; pod-only policy would miss them.
 - **Why does the Deployment still say GHCR?** The agent mutates admitted pods.
-- **Is this signed?** The optional signing stretch is not implemented. Do not
-  imply an SBOM or release checksum authenticates a publisher.
+- **Is this signed?** Yes: Zarf signs the application package with a local
+  encrypted Cosign key. Deploy and SBOM extraction require `--verify=always`
+  and an independently enrolled public key. Private keys never reach the node.
+  The separate init release is checksummed, not upstream-signature-authenticated.
+- **What happens on tampering?** Run `bash scripts/test-signing.sh --trusted-key
+  "$PWD/keys/cosign.pub"` after the demo. Wrong key, missing signature, modified
+  manifest and modified payload fail offline before changing the deployment.
+- **Does verification need Rekor?** Not for this local-key flow; no tlog upload.
+  This does not demonstrate revocation, trusted timestamps or replay prevention.
 - **What about unrelated host storage?** Demo-only absolute disk thresholds
   avoid percentage-based pressure; we never prune other projects.
 - **Can Git be optional?** Yes, but this package explicitly requires it and init

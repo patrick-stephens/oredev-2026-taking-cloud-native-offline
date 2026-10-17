@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# AIR-GAPPED: ./scripts/air-gapped.sh
+# AIR-GAPPED: ./scripts/air-gapped.sh --trusted-key /trusted/cosign.pub
 # All Zarf/kubectl operations run inside the node's blocked network namespace.
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+[[ $# == 2 && "$1" == --trusted-key && -s "$2" ]] ||
+    die "Usage: ./scripts/air-gapped.sh --trusted-key /independently/enrolled/cosign.pub"
+trusted_key="$(realpath "$2")"
 require_tools
 assert_owned
+assert_private_keys_unmounted
 [[ -s "$ARTIFACTS/$PACKAGE" && -s "$ARTIFACTS/$INIT" ]] ||
     die "Run the connected phase first; offline mode never downloads packages."
 phase "PHASE 2: AIR-GAPPED - block and prove node/pod egress"
@@ -21,6 +25,13 @@ printf 'PROVED: external HTTP blocked; egress firewall covers node OUTPUT and po
 audit_egress > "$ARTIFACTS/egress-before.txt"
 docker exec "$NODE" iptables -t mangle -Z ZARF_DEMO_EGRESS
 docker exec "$NODE" ip6tables -t mangle -Z ZARF_DEMO_EGRESS
+docker exec "$NODE" mkdir -p /work/trust
+docker cp "$trusted_key" "$NODE:/work/trust/cosign.pub"
+# Authenticate before bootstrapping anything; never trust a key from the package.
+target_zarf package verify "/work/artifacts/$PACKAGE" --key /work/trust/cosign.pub \
+    > "$STATE/verify.log" 2>&1 ||
+    die "Package signature/integrity verification failed before init. See .state/verify.log."
+printf 'VERIFIED: package signature and integrity using the independently trusted public key, offline.\n'
 
 phase "PHASE 3: AIR-GAPPED - Zarf injector bootstraps registry, agent and Git"
 if kube -n zarf get secret zarf-package-init >/dev/null 2>&1; then
@@ -37,6 +48,7 @@ printf 'INITIALIZED: registry, mutating agent and local Gitea are running.\n'
 
 phase "PHASE 4: AIR-GAPPED - deploy the complete package"
 target_zarf package deploy "/work/artifacts/$PACKAGE" --confirm --timeout 180s \
+    --verify=always --key /work/trust/cosign.pub \
     > "$STATE/deploy.log" 2>&1 ||
     die "Offline deploy failed. Private diagnostic log: .state/deploy.log."
 kube -n podinfo rollout status deployment/podinfo --timeout=90s
@@ -51,7 +63,8 @@ target_zarf tools registry catalog > "$ARTIFACTS/registry-catalog.txt"
 grep -F 'podinfo' "$ARTIFACTS/registry-catalog.txt" || die "podinfo missing from seeded registry."
 target_zarf package list > "$ARTIFACTS/package-list.txt"
 grep -F 'podinfo-offline' "$ARTIFACTS/package-list.txt" || die "Package not recorded in cluster."
-target_zarf package inspect sbom "/work/artifacts/$PACKAGE" --output /work/artifacts/sbom-offline
+target_zarf package inspect sbom "/work/artifacts/$PACKAGE" --output /work/artifacts/sbom-offline \
+    --verify=always --key /work/trust/cosign.pub
 # This evidence is public; only the SBOM directory is made host-readable.
 docker exec "$NODE" chmod -R a+rX /work/artifacts/sbom-offline
 sbom="$ARTIFACTS/sbom-offline/podinfo-offline/ghcr.io_stefanprodan_podinfo_6.15.0.json"

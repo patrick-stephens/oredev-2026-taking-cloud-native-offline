@@ -1,8 +1,8 @@
-# Offline admission: Ratify + Notation + local trust
+# Offline admission: Ratify, local trust and signed SBOMs
 
 | Spectrum level | Demo app | Headline tooling | Status |
 |----------------|----------|------------------|--------|
-| 3–4 | go-httpbin | ratify, notation | 🚧 WIP |
+| 3 | go-httpbin | Ratify, Notation, cosign, Syft | Tested 2026-10-17 |
 
 Deploy-time signature verification with locally bundled trust roots
 
@@ -21,6 +21,11 @@ The tested baseline is **Ratify**, not a Kyverno substitute. It admits a signed
 image, pins its digest, rejects an unsigned image, and rejects a previously
 signed tag overwritten with a one-layer modification. No Rekor, Fulcio, TUF,
 cloud credentials, external key service or online CA is involved in admission.
+
+Two tested stretch profiles extend that baseline: **cosign OCI-referrer
+signatures with a local public key**, and **mandatory signed SPDX SBOMs in
+addition to Notation image signatures**. They are separate profiles, not a
+claim that the cosign profile also enforces SBOMs.
 
 ## Architecture
 
@@ -41,7 +46,8 @@ Linux host (Docker, kind, Helm, Notation; remains connected)
         +-- same kind node: 172.30.87.3          |
         +-- zot: 172.30.87.2:5000 <-------------+
               demo/httpbin:{signed,unsigned,tampered}
-              OCI Notation signature referrer for the original digest
+              OCI signature referrers (Notation OR cosign)
+              SBOM profile: image <-- SPDX artifact <-- Notation signature
 
 AIR-GAPPED:
   pod egress: default deny + explicit cluster/registry allowlist (kube-router)
@@ -64,7 +70,8 @@ firewall, Docker daemon configuration and unrelated networks are not changed.
 - `kind v0.31.0` and `helm v4.3.0` on PATH; the script checks these versions.
 - Bash 4+, curl, jq, OpenSSL, GNU coreutils (`timeout`, `sha256sum`, `base64`,
   `date`, etc.), tar, grep, sed, diff and `clear`. No host kubectl, Skopeo or
-  Notation installation is required.
+  Notation, cosign, ORAS or Syft installation is required. The pinned kind node
+  includes `nft` for the independent network-audit counter.
 - Connected access to GitHub releases/raw chart hosting, GHCR, Docker Hub,
   Quay and their auth/CDN endpoints. The positive egress tests use
   `https://1.1.1.1/cdn-cgi/trace` and `https://example.com`. If those are blocked
@@ -73,7 +80,7 @@ firewall, Docker daemon configuration and unrelated networks are not changed.
   VPN/LAN. Pod/service ranges are `10.244.0.0/16` and `10.96.0.0/16`.
 - Reserve the names `offline-ratify`, `offline-ratify-zot`,
   `offline-ratify-internal`, `offline-ratify-uplink`, and local image tags
-  `offline-ratify-httpbin:{unsigned,modified}` for this demo. Run one instance
+  `offline-ratify-httpbin:*` for this demo. Run one instance
   per Docker engine. A new run deletes and recreates this named cluster.
 
 ## Tested with
@@ -89,6 +96,10 @@ Latest end-to-end test date: **2026-10-17**, native Linux amd64, cgroup v2.
 | Ratify / Helm chart | v1.4.6 / 1.15.7 |
 | Gatekeeper / Helm chart / CRD hook image | v3.23.1 / 3.23.1 / v3.23.1 |
 | Notation CLI | 1.3.2 |
+| cosign CLI (cosign profile) | 2.4.3 |
+| ORAS CLI (stretch profiles) | 1.3.0 |
+| Syft CLI (SBOM profile) | 1.46.0 |
+| Ratify SPDX verifier (SBOM profile) | 2.0.0-alpha.1 |
 | zot | v2.1.15, linux-amd64 image |
 | go-httpbin | 2.26.0; binary reports commit `8b1bc14` |
 | kube-router (policy controller only) | v2.5.0 |
@@ -97,12 +108,21 @@ Latest end-to-end test date: **2026-10-17**, native Linux amd64, cgroup v2.
 | htpasswd tooling image | httpd:2.4.65-alpine |
 | Host Bash / curl / jq / ShellCheck | 5.2.21 / 8.5.0 / 1.7 / 0.9.0 |
 
-The latest complete rehearsal took **183 seconds (3m03s)** with container/tool
-downloads cached and `DEMO_PAUSE_SECONDS=0` (the previous run on 2026-10-16 took
-159 seconds). Cold downloads are additional and
-were not measured as a successful cold end-to-end run. Default narration sleeps
-add 12 seconds; actual bootstrap time varies. Each successful run records its
-own wall-clock runtime and versions in the generated evidence directory.
+The latest full `--all` rehearsal passed in **370 seconds (6m10s)** with
+container/tool downloads cached and `DEMO_PAUSE_SECONDS=0`:
+
+| Profile | Runtime | Verified result |
+|---|---:|---|
+| `notation` | 109s | Signed allowed; unsigned/tampered denied |
+| `cosign` | 119s | Same admission matrix; real OCI referrers, no legacy signature tags |
+| `sbom` | 142s | Signed image + signed SBOM allowed; all seven negative fixtures denied |
+
+All profiles served go-httpbin after isolation, pinned the verified image digest,
+blocked node/Pod/verifier internet probes, and observed no external packets in
+the workload audit. Cold downloads are additional and were not measured as a
+successful cold end-to-end run. Default narration sleeps add 12 seconds per
+profile; bootstrap time varies. Each successful run records runtime and versions
+in its own evidence directory.
 
 Supplementary revalidation on 2026-10-17 also confirmed that unsigned
 `initContainers` and an unsigned `ephemeralContainers` update are denied.
@@ -115,7 +135,7 @@ for a server-side dry-run admission to succeed. These supplementary checks are
 not extra phases in the normal presentation run.
 
 [config/versions.env](./config/versions.env) pins image/tool/chart versions,
-the kind node and application source digests, and chart/Notation archive
+the kind node and application source digests, and chart/tool archive
 checksums. Supporting images use version tags, not immutable digest locks;
 their publishers remain part of connected bootstrap trust.
 
@@ -127,6 +147,20 @@ From the repository root:
 cd advanced-demos/ratify-notation-policy
 ./scripts/run-demo.sh
 ```
+
+Select a stretch profile, or test all three with fresh clusters sequentially:
+
+```bash
+DEMO_PROFILE=cosign ./scripts/run-demo.sh
+DEMO_PROFILE=sbom ./scripts/run-demo.sh
+DEMO_PAUSE_SECONDS=0 ./scripts/run-demo.sh --all
+```
+
+`notation` remains the default. Each invocation replaces the same named cluster
+and registry. Evidence and public trust exports are separated under
+`.state/<profile>/` and `bundle/<profile>/`; only the last cluster remains
+running after `--all`. For later inspection, set `DEMO_PROFILE` before sourcing
+[scripts/common.sh](./scripts/common.sh).
 
 For an unattended, readable rehearsal without terminal clearing:
 
@@ -158,6 +192,8 @@ output for a failed command.
    orchestrator rather than pasting them into your personal Notation config.
    Verify both `signed` and the original `tampered` tag, then overwrite
    `tampered` with the modified image. Export the public certificate and policy.
+   The cosign profile uses a key pair instead; the SBOM profile also generates,
+   attaches and signs a real Syft inventory plus negative fixtures. See below.
 4. Create kind, configure containerd's **endpoint-specific** HTTP registry
    mirror, install kube-router alongside kindnet, and preload policy/probe
    images. **Do not preload the application into the node.** Install Gatekeeper
@@ -182,8 +218,8 @@ enforce NetworkPolicy; omitting kube-router would invalidate this demo.
    API self-calls. None of these rules are installed on the Docker host.
 2. Check the registry's network is internal and its only attachment; assert
    the node has no default route. Probe public IP access from the node, a Pod,
-   and **Ratify's actual network namespace**. Check public DNS fails from the
-   node and Pod while the authenticated local registry remains reachable.
+   and **Ratify's actual network namespace** while the authenticated local
+   registry remains reachable.
 3. Create `httpbin-signed` by tag. Gatekeeper's external-data mutation resolves
    it to the digest; validating admission asks Ratify to verify that digest.
    Assert the admitted Pod is digest-pinned and becomes Ready, then call
@@ -192,7 +228,17 @@ enforce NetworkPolicy; omitting kube-router would invalidate this demo.
    `validation.gatekeeper.sh` denials containing `Offline signature required:`;
    a timeout, image pull failure or registry authentication error is **not**
    accepted as a passing negative test. Assert neither rejected Pod exists.
-5. Recheck external access, save actual denials/logs/manifests/firewall state,
+5. In the SBOM profile, reject five additional evidence-negative fixtures.
+   Compare a separate nftables audit counter before/after the actual workload;
+   any disallowed packet increment fails the demo. The audit excludes cluster,
+   registry, node/loopback and IPv6 link-local multicast destinations.
+   IPv6 multicast remains blocked by the firewall; creating Pod interfaces
+   naturally generates local neighbor-discovery/membership packets, not internet
+   traffic. A separate nft table avoids kube-router's iptables counter resets.
+6. Check public DNS fails from node and Pod using unprimed names, then recheck
+   external IP access. DNS negative probes run after the workload audit because
+   CoreDNS can retry an intentionally blocked lookup after curl has exited.
+   Save actual denials/logs/manifests/firewall state,
    and print PASS only after all assertions succeed.
 
 Ratify's ORAS cache, Ratify verification cache and Gatekeeper external-data
@@ -228,14 +274,15 @@ BLOCKED: pod-policy-external (curl exit 7)
 === PHASE 5: AIR-GAPPED - node firewall sealed, no default route, local trust only ===
 BLOCKED: node-offline-external (curl exit 7)
 BLOCKED: pod-offline-external (curl exit 7)
-BLOCKED: node-offline-public-dns (curl exit 6)
-BLOCKED: pod-offline-public-dns (curl exit 28)
 BLOCKED: ratify-offline-external (curl exit 7)
 pod/httpbin-signed created
 pod/httpbin-signed condition met
+BLOCKED: node-offline-public-dns (curl exit 6)
+BLOCKED: pod-offline-public-dns (curl exit 28)
 PASS: signed allowed and digest-pinned; unsigned denied; tampered denied.
 PASS: go-httpbin /get served locally; pod, verifier and node external access blocked.
-Runtime: 183 seconds
+PASS: notation profile; no external packets observed by node audit during admission workload.
+Runtime: 109 seconds
 ```
 
 Actual denials captured in the tested run:
@@ -248,7 +295,7 @@ Error from server (Forbidden): admission webhook "validation.gatekeeper.sh" deni
 Trace IDs change each run. go-httpbin returns `args.demo: ["offline"]`, not the
 scalar shape of some other httpbin implementations.
 
-The ignored `.state/evidence/` directory contains exact denial text, signed Pod
+The ignored `.state/<profile>/evidence/` directory contains exact denial text, signed Pod
 JSON, application response, source/local digests, effective trust policy,
 network inspection, routes, iptables state, Ratify/zot logs, events and runtime.
 A rejected direct Pod creation has **no Pod Event**, because no Pod is created;
@@ -259,6 +306,7 @@ Inspect without reopening internet access:
 
 ```bash
 (
+  export DEMO_PROFILE=notation # use cosign or sbom for the most recent run
   source ./scripts/common.sh
   k -n offline-demo get pods -o wide
   k get verifier verifier-notation -o yaml
@@ -276,19 +324,26 @@ The generated **trust-only** export is deliberately small:
 
 ```text
 bundle/
-  trustPolicy.json
-  truststore/x509/ca/offline-demo/root.crt   # public PEM certificate
+  notation/
+    trustPolicy.json
+    truststore/x509/ca/offline-demo/root.crt   # public PEM certificate
+  cosign/
+    cosign.pub                               # public key only, no certificate
+  sbom/
+    trustPolicy.json
+    truststore/x509/ca/offline-demo/root.crt
 ```
 
-The certificate is a freshly generated RSA-2048 self-signed **test** signing
+Only profiles actually run have exports. Each Notation certificate is a freshly
+generated RSA-2048 self-signed **test** signing
 certificate/trust anchor, with subject
 `CN=offline-demo,O=Notary,L=Seattle,ST=WA,C=US`. It is not an enterprise CA
 hierarchy. Notation gives this test certificate roughly **24 hours** of validity.
 The script regenerates it on each run. Read its actual public contents with:
 
 ```bash
-cat bundle/truststore/x509/ca/offline-demo/root.crt
-openssl x509 -in bundle/truststore/x509/ca/offline-demo/root.crt \
+cat bundle/notation/truststore/x509/ca/offline-demo/root.crt
+openssl x509 -in bundle/notation/truststore/x509/ca/offline-demo/root.crt \
   -noout -subject -dates -fingerprint -sha256
 ```
 
@@ -315,7 +370,7 @@ maintaining a separate cluster policy. The chart maps the certificate to
 `ratify-notation-inline-cert-0` and its logical store to `ca:certs`; the script
 compares the effective policy against the export with that name translation.
 Ratify's inline key-management provider holds only the **public certificate**.
-The private signing key stays under `.state/xdg/notation/localkeys/` on the
+The private signing key stays under `.state/<profile>/xdg/notation/localkeys/` on the
 host and is neither exported nor mounted into the cluster.
 
 The verifier trusts a pre-distributed root and an explicit certificate subject,
@@ -329,6 +384,77 @@ and transparency infrastructure for local PKI/key custody and local policy.
 There is no public Rekor inclusion proof or independent visibility into signing
 activity. Sigstore can also verify properly bundled evidence offline; it is
 incorrect to claim all Sigstore verification inherently requires internet.
+
+## Stretch profile: cosign OCI referrers
+
+`DEMO_PROFILE=cosign` disables the Notation verifier entirely. The host generates
+a fresh cosign key pair; only the public key enters Ratify's inline key provider.
+Private key `.state/cosign/cosign.key` has an empty passphrase for this throwaway
+demo and restrictive host permissions. Do not reuse it for production.
+
+The pinned cosign 2.4.3 integration uses `COSIGN_EXPERIMENTAL=1`, signing with
+`--registry-referrers-mode=oci-1-1 --tlog-upload=false`, and CLI verification with
+`--experimental-oci11 --offline --insecure-ignore-tlog`. Signing and verification
+do **not** accept the same OCI flag. Ratify has `tLogVerify: false` and trusts
+only the staged public key. Its scope is
+`172.30.87.2:5000/demo/httpbin@sha256:*`: this Ratify version matches the full
+digest reference, not a repository-only scope as Notation does.
+
+The script queries zot's real `/v2/demo/httpbin/referrers/<digest>` endpoint and
+requires artifact type `application/vnd.dev.cosign.artifact.sig.v1+json`.
+It also asserts that no legacy `sha256-*.sig` tags exist. Thus Ratify's available
+legacy lookup cannot be responsible for a passing verification.
+
+These deliberately older compatibility pins exercise Ratify v1.4.6's cosign
+integration, not the newest cosign v3 bundle format. There is no Notation
+certificate, public log submission, inclusion proof, keyless identity or remote
+key service. The public key remains a trust root that needs controlled
+distribution and rotation.
+
+## Stretch profile: require image signature AND signed SPDX SBOM
+
+`DEMO_PROFILE=sbom` uses Syft to inventory the local Docker archive, disables
+Syft's update check, and requires nonempty SPDX 2.3 output. ORAS attaches that
+document as `application/spdx+json` using the real OCI 1.1 referrers API.
+Notation signs the **SBOM artifact digest** as well as the image digest:
+
+```text
+image digest <-- subject: SPDX artifact <-- subject: Notation signature
+      ^
+      +--------- subject: Notation image signature
+```
+
+Ratify's SPDX verifier validates the document; the nested Notation verifier
+validates its signature against the same local trust policy.
+[manifests/sbom-policy.yaml](./manifests/sbom-policy.yaml) explicitly requires
+both a successful top-level image signature and a successful SPDX report with
+a successful nested signature, rejecting any failed/empty verifier reports.
+Simply enabling the chart's SBOM verifier is insufficient: the default policy
+does not require an SBOM to exist.
+
+| Tag | Image signature | SBOM evidence | Expected admission |
+|---|---|---|---|
+| `signed` | Trusted | Trusted signed SPDX bound to this image | Allow |
+| `unsigned` | Missing | Missing | Deny |
+| `tampered` | Missing for changed digest | Trusted signed SPDX | Deny |
+| `missing-sbom` | Trusted | Missing | Deny |
+| `wrong-subject-sbom` | Trusted | Trusted signed artifact attached to another digest | Deny |
+| `untrusted-sbom` | Trusted | Signed with a separate, untrusted test identity | Deny |
+| `unsigned-sbom` | Trusted | SPDX artifact without a signature | Deny |
+| `unsigned-with-sbom` | Missing | Trusted signed SPDX | Deny |
+
+The five extra variants change only image configuration labels, preserving the
+same app filesystem. The tampered fixture still adds exactly one layer.
+All seven denial messages are captured by tag; the script requires actual
+validating evidence denials and no persisted rejected Pods.
+
+This is a **signed, OCI-subject-bound SPDX artifact**, not an in-toto/DSSE
+attestation. It proves trusted evidence exists for the digest, not that the
+inventory is complete, vulnerability-free, or independently reproduced.
+Negative fixtures intentionally reuse inventory bytes; there is no claim that
+Ratify compares the listed packages to the actual image filesystem.
+The Ratify SPDX plugin is **2.0.0-alpha.1**; treat this as a tested advanced demo,
+not a production stability guarantee.
 
 ## Where network is still required
 
@@ -376,6 +502,12 @@ incorrect to claim all Sigstore verification inherently requires internet.
 - **Freshness:** the test cert expires in a day; rerun before a presentation.
   Caches are off for correctness, not performance. Production certificates
   need a rehearsed offline rotation/revocation design.
+- **Cosign `No policy found`:** retain the digest-prefix wildcard scope above.
+  A Notation-style repository-only scope does not match this verifier.
+- **SBOM positive case denied:** inspect the nested verifier reports, not just
+  the image signature. The Rego input is `input.verifierReports`; its children
+  have their own `verifierReports` and `nestedReports` arrays. An untrusted SBOM
+  identity must fail even when the image signature passes.
 - **Admission scope/availability:** fail-closed behavior is namespace-scoped to
   avoid deadlocking cluster bootstrap. This is not a hardened multi-tenant
   cluster. Add RBAC, namespace protection, hostNetwork/privilege restrictions,
@@ -389,8 +521,9 @@ incorrect to claim all Sigstore verification inherently requires internet.
   and separate push/read-only credentials in production. The signing cert is
   not the registry TLS certificate.
 - **Not exercised:** rootless/arm64/multi-node operation, real CA hierarchies,
-  online CRL/OCSP policies, offline upgrades, and the
-  stretch goals below. No Kyverno fallback was necessary.
+  online CRL/OCSP policies, offline upgrades, cosign v3 compatibility, DSSE
+  attestations, and combined cosign + SBOM enforcement. No Kyverno fallback
+  was necessary.
 
 ## Cleanup
 
@@ -401,7 +534,7 @@ incorrect to claim all Sigstore verification inherently requires internet.
 [Cleanup](./scripts/cleanup.sh) is idempotent, removes only the named kind
 cluster, zot container and two demo networks, and therefore removes the node
 firewall with its container. No host firewall rules need undoing. It retains
-downloaded Docker images, the two small derived image tags, `.state/` (including
+downloaded Docker images, derived fixture image tags, `.state/` (including
 throwaway keys/password/kubeconfig), and the public `bundle/` for inspection.
 Those generated directories and certificate/key extensions are Git-ignored.
 Do not publish the private state or your terminal trace with shell `-x`.
@@ -414,15 +547,12 @@ Do not prune the shared Docker engine.
 - **OCI referrer portability:** preserving image manifests without preserving
   their referrer graph loses signatures/SBOMs. Standardized graph-aware copy and
   bundle tooling is the next step beyond this local registry demonstration.
-- **Cosign referrers — # UNTESTED stretch goal:** keep a separate pinned
-  experiment with Ratify's cosign verifier, a locally distributed cosign public
-  key and OCI referrer signatures. Disable online transparency lookups only
-  when policy deliberately replaces them with offline trust/evidence. Removing
-  the Notation certificate does not remove the need for a trust root.
-- **SBOM admission — # UNTESTED stretch goal:** stage a signed SPDX/CycloneDX
-  referrer, add its verifier, and require **both** a valid image signature and
-  a validated SBOM bound to that same subject digest. Test missing, wrong-subject
-  and untrusted SBOMs; merely attaching an unsigned SBOM is not sufficient.
+- **Cosign evolution:** migrate the tested v2 experimental OCI format toward
+  stable bundle/referrer interoperability as Ratify support evolves; rerun the
+  no-legacy-tag and offline tests rather than assuming CLI compatibility.
+- **Evidence policy:** build on the tested signed-SPDX requirement with DSSE
+  attestations, producer identity, freshness and independently verified SBOM
+  coverage. Document signatures alone do not establish inventory correctness.
 - **Lifecycle:** package signed trust snapshots, expiry windows, root rollover
   and revocation deltas with applications; verify those updates inside the
   disconnected site. Referrer-aware tooling alone cannot solve trust freshness.

@@ -24,16 +24,17 @@ phase '1 / CONNECTED' 'preload pinned tooling and the official stable Alpine ima
 docker pull "$ZOT_IMAGE"
 docker build --build-arg "ALPINE_IMAGE=$ALPINE_IMAGE" \
   --build-arg "ORAS_IMAGE=$ORAS_IMAGE" --build-arg "SYFT_IMAGE=$SYFT_IMAGE" \
+  --build-arg "COSIGN_IMAGE=$COSIGN_IMAGE" \
   -t "$TOOLS_IMAGE" -f "$ROOT/config/Dockerfile" "$ROOT/config"
 docker network create --label "$LABEL=$PREFIX" "$UPLINK" >/dev/null
 start_registry "$CONNECTED" "$UPLINK" "$PREFIX-connected-data"
 tools "$CONNECTED" bash -euo pipefail -c \
-  'oras version; syft version; curl --version; jq --version; iptables --version; apk info -v' \
+  'oras version; syft version; cosign version; curl --version; jq --version; iptables --version; apk info -v' \
   > "$RUN_DIR/tool-versions.txt"
 docker version > "$RUN_DIR/docker-version.txt"
 docker image inspect "$ZOT_IMAGE" "$TOOLS_IMAGE" > "$RUN_DIR/tool-images.json"
 
-phase '2 / CONNECTED' 'build the image + SBOM + policy + fake model graph'
+phase '2 / CONNECTED' 'build and sign the image + SBOM + policy + fake model graph'
 tools "$CONNECTED" oras copy --platform linux/amd64 \
   "$ALPINE_IMAGE" "$REPOSITORY:$TAG" --to-plain-http
 SUBJECT="$(tools "$CONNECTED" oras resolve --plain-http "$REPOSITORY:$TAG")"
@@ -56,6 +57,21 @@ for artifact in "sbom.spdx.json:$SBOM_TYPE" "policy.json:$POLICY_TYPE" "model.bi
   tools "$CONNECTED" oras attach --plain-http --distribution-spec v1.1-referrers-api \
     --artifact-type "${artifact#*:}" "$REPOSITORY@$SUBJECT" "$artifact"
 done
+tools "$CONNECTED" bash -euo pipefail -c '
+  export COSIGN_PASSWORD=""
+  umask 077
+  mkdir -p /work/trust
+  cd /tmp
+  cosign generate-key-pair --output-key-prefix signer
+  cosign generate-key-pair --output-key-prefix wrong
+  cp signer.pub /work/trust/cosign.pub
+  cp wrong.pub /work/trust/wrong.pub
+  cosign sign --yes --key signer.key --new-bundle-format=true \
+    --tlog-upload=false --use-signing-config=false \
+    --allow-http-registry "$1"
+' _ "$REPOSITORY@$SUBJECT"
+tools "$CONNECTED" bash /scripts/verify-signature.sh "$SUBJECT" /work/trust/cosign.pub \
+  > "$RUN_DIR/connected-signature.json"
 tools "$CONNECTED" bash /scripts/snapshot.sh connected "$SUBJECT"
 echo 'Raw OCI 1.1 referrers endpoint (not a synthetic sha256-*.referrers tag):'
 jq . "$RUN_DIR/connected/referrers.json"
@@ -131,7 +147,8 @@ diff -u "$RUN_DIR/connected/tree.canonical.json" "$RUN_DIR/airgapped/tree.canoni
 while IFS= read -r artifact_digest; do
   tools "$OFFLINE" oras pull --plain-http "$REPOSITORY@$artifact_digest" \
     -o "/work/pulled/$artifact_digest"
-done < <(jq -r '.manifests[].digest' "$RUN_DIR/airgapped/referrers.json")
+done < <(jq -r '.manifests[] | select(.artifactType != "application/vnd.dev.sigstore.bundle.v0.3+json") | .digest' \
+  "$RUN_DIR/airgapped/referrers.json")
 tools "$OFFLINE" bash -euo pipefail -c '
   for file in sbom.spdx.json policy.json model.bin; do
     matches=(pulled/*/"$file")
@@ -140,6 +157,16 @@ tools "$OFFLINE" bash -euo pipefail -c '
   done
   sha256sum -c payloads.sha256
 '
+tools "$OFFLINE" bash /scripts/verify-signature.sh "$SUBJECT" /work/trust/cosign.pub \
+  > "$RUN_DIR/airgapped-signature.json"
+diff -u "$RUN_DIR/connected-signature.json" "$RUN_DIR/airgapped-signature.json"
+if tools "$OFFLINE" bash /scripts/verify-signature.sh "$SUBJECT" /work/trust/wrong.pub \
+  > "$RUN_DIR/wrong-key.stdout" 2> "$RUN_DIR/wrong-key.stderr"; then
+  die "Cosign unexpectedly accepted the wrong public key."
+fi
+grep -q 'failed to verify signature' "$RUN_DIR/wrong-key.stderr" ||
+  die "Wrong-key verification failed for an unexpected reason; inspect wrong-key.stderr."
+echo 'PASS: Cosign verified the isolated image; the wrong public key was rejected.'
 firewall '
   iptables -vnxL DEMO_OFFLINE
   ip6tables -vnxL DEMO_OFFLINE
@@ -149,6 +176,6 @@ firewall '
 ' > "$RUN_DIR/firewall-workload.txt"
 tools "$OFFLINE" bash -euo pipefail -c 'cd bundle; sha256sum -c /work/bundle.sha256' >/dev/null
 ELAPSED=$((SECONDS - START_SECONDS))
-printf 'PASS: image + 3 referrers, identical digests, descriptors, trees and payload bytes.\nPASS: external egress blocked; zero rejected workload packets.\nTotal runtime: %ss\nEvidence: %s\n' \
+printf 'PASS: image + 4 referrers, identical digests, descriptors, trees and payload bytes.\nPASS: Cosign verified the isolated image; wrong-key verification failed.\nPASS: external egress blocked; zero rejected workload packets.\nTotal runtime: %ss\nEvidence: %s\n' \
   "$ELAPSED" "$RUN_DIR" | tee "$RUN_DIR/result.txt"
 echo 'Registry remains isolated for inspection. Release resources with scripts/cleanup.sh.'

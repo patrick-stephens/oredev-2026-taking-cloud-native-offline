@@ -8,7 +8,7 @@ model data? The deliverable is a graph, not a tag.”
 
 Use this as an advanced follow-on to the cache and bundle demos, and as a concrete
 bridge to the talk's **Future work** slide: OCI registries as artifact stores,
-portable metadata, graph-aware promotion, and eventually offline trust.
+portable metadata, graph-aware promotion, and offline key-based verification.
 
 This example deliberately uses official stable Alpine, not an application build:
 the interesting change is the supply-chain packaging around a familiar image.
@@ -17,7 +17,7 @@ the interesting change is the supply-chain packaging around a familiar image.
 
 - Read the isolation and authenticity limitations in [README.md](README.md).
 - Rehearse [scripts/run-demo.sh](scripts/run-demo.sh) on the actual Linux amd64
-  Docker host. Check it prints both PASS lines. Prepare tool downloads/builds in
+  Docker host. Check all three final PASS lines, including Cosign. Prepare tool downloads/builds in
   advance by doing one full run; do not rely on conference Wi-Fi for first pulls.
 - Run [scripts/cleanup.sh](scripts/cleanup.sh) to remove registry storage.
   Downloaded tools remain local. A new run also resets those resources itself.
@@ -27,7 +27,7 @@ the interesting change is the supply-chain packaging around a familiar image.
   DEMO_PAUSE_SECONDS=8 ./scripts/run-demo.sh
   ```
 
-- Default two-second sleeps gave 18- and 78-second warm rehearsals on 2026-10-17;
+- The Cosign-enabled run with two-second sleeps took 25 seconds on 2026-10-17;
   allow two to four minutes for explanation, not just command execution.
   Banners clear an interactive terminal, but evidence is retained under
   `.state/latest`. Redirected output is not cleared.
@@ -36,12 +36,14 @@ the interesting change is the supply-chain packaging around a familiar image.
 
 ### CONNECTED: preparation is part of the contract
 
-1. **Phase 1 — Tools are inputs too.** zot, ORAS, Syft and Alpine are version
+1. **Phase 1 — Tools are inputs too.** zot, ORAS, Syft, Cosign and Alpine are version
    pinned. Tool images must already exist before isolation.
-2. **Phase 2 — Point at the three reverse edges.** The image digest is the
+2. **Phase 2 — Point at the four reverse edges.** The image digest is the
    immutable anchor. The SBOM is real Syft output; policy is illustrative JSON;
    the 1024-byte fake model makes the universal artifact-store story tangible.
-   Do not call it a trained model or a ModelKit.
+   Do not call it a trained model or a ModelKit. The fourth artifact is a Cosign
+   signature bundle. Signing keys exist only in the tools container's tmpfs;
+   only public keys survive. The image signature uses no public Sigstore service.
 3. **Show the endpoint JSON.** `artifactType`, `digest` and `size` are descriptors
    returned by zot's native referrers API, not fabricated tag parsing. The
    attached manifest contains `subject.digest`.
@@ -56,8 +58,10 @@ the interesting change is the supply-chain packaging around a familiar image.
    Clients share its namespace. Firewall rules allow only loopback; even Docker
    DNS forwarding is blocked. Public-address and DNS probes must fail.
 6. **Phase 5 — The destination has to reconstruct it.** Import the OCI layout.
-   Show the same image and three referrer digests. ORAS pulls every payload from
-   the isolated registry and compares original bytes.
+   Show the same image and four referrer digests. ORAS pulls the three data
+   payloads and compares original bytes. Cosign fetches its bundle from isolated
+   zot and verifies the image with the saved public key. The wrong key must fail
+   cryptographically; it is not enough to get a generic connection error.
 7. **Finish on the stronger assertion.** After intentional probes are reset,
    external-rejection counters must remain zero throughout the actual workload.
    Do not confuse that packet-level check with tracing every failed `connect()`
@@ -94,8 +98,17 @@ manifest. It does not claim to mirror Docker Hub's entire index and attestations
 and this demo does not query a vulnerability database or enforce policy.
 
 **Do checksums prove who published the artifacts?** No. They prove preservation.
-The inventory is not signed. Cosign plus an offline verification/trust bundle
-is future work; never imply signature verification was demonstrated.
+Cosign now verifies the image relative to the saved demo public key, which is
+the explicitly chosen trust anchor. In production, distribute that key through
+an independently authenticated channel. The inventory and other referrers are
+not signed; this signature does not bind an SBOM or policy to the image.
+
+**What about Rekor and keyless signing?** Neither is demonstrated. Signing uses
+`--tlog-upload=false --use-signing-config=false`; verification uses
+`--offline --insecure-ignore-tlog` and an explicitly empty Sigstore trusted root
+to prevent TUF bootstrap. The public key still verifies the actual signature.
+Cosign warns about the omitted log check. Its 3.0.2 status line claiming offline
+log verification is misleading in this mode: there is no inclusion proof.
 
 **Will this work with every registry?** Only when the required API and artifact
 semantics are supported. The script forces OCI 1.1 native referrers and fails

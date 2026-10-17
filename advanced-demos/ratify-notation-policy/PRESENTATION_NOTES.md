@@ -13,8 +13,12 @@ unrelated applications selected to produce different policy results.
 ## Preparation
 
 - Run [the orchestrator](./scripts/run-demo.sh) once on the presentation machine.
-  Rehearse with `DEMO_PAUSE_SECONDS=0`; the latest successful run took 183s
-  with downloads cached, excluding cold downloads and narration pauses.
+  Rehearse with `DEMO_PAUSE_SECONDS=0`; the latest complete `--all` suite took
+  370s with downloads cached: Notation 109s, cosign 119s, signed SBOM 142s.
+  Cold downloads and narration pauses are additional.
+- Choose `DEMO_PROFILE=cosign` for local-key OCI-referrer signatures without
+  Notation, or `DEMO_PROFILE=sbom` for mandatory signed SPDX plus image signature.
+  The default remains Notation; profiles replace the same cluster sequentially.
 - Use native Linux amd64 with privileged rootful Docker and cgroup v2.
   Reserve the documented subnets and names. Do not use a production cluster.
 - The Notation test certificate lasts about one day. Rerun on the day; it
@@ -34,7 +38,7 @@ unrelated applications selected to produce different policy results.
 
 "We can buy dependencies now. We cannot buy them after the boundary closes."
 
-Show the version/digest pins. Notation and both charts have archive checksums.
+Show the version/digest pins. Downloaded tools and both charts have checksums.
 Images and tooling are staged before isolation. No public Helm repository is
 consulted during admission.
 
@@ -51,7 +55,13 @@ Explain the trap before showing the result:
   same tag is overwritten by a build with one added layer.
 
 The public trust-only bundle has a certificate and policy, **not** a private
-key. Signing happens on the host; verification happens in Ratify.
+key (cosign exports just a public key). Signing happens on the host;
+verification happens in Ratify.
+
+For the cosign profile, show the real referrers API response and the assertion
+that no legacy `sha256-*.sig` tags exist. For SBOM, show the graph:
+image <- SPDX artifact <- Notation signature, plus the separate image signature.
+The SBOM inventory comes from a local Syft scan, not a fabricated JSON stub.
 
 ### CONNECTED: phases 3-4
 
@@ -71,7 +81,7 @@ to the AIR-GAPPED banner. zot has been internal-only throughout.
 
 "The node, the Pod and the verifier all lose public access; local services stay."
 
-Point out the direct-IP probe, public-DNS probe and Ratify network-namespace
+Point out the direct-IP probe and Ratify network-namespace
 probe. This is a software-enforced disconnected enclave, not an unplugged host.
 The node retains its Docker attachment to preserve its control-plane address;
 the missing route and in-container firewall are the node enforcement boundary.
@@ -87,7 +97,14 @@ the node-local kubectl through Docker, not a public endpoint or manifest URL.
    `/get?demo=offline` response.
 2. Unsigned Pod gets a validating admission denial, not ImagePullBackOff.
 3. Overwritten `tampered` tag gets the same explicit signature requirement.
-4. Final public probes still fail. PASS appears only after all assertions.
+4. In the SBOM profile, reject missing, wrong-subject, untrusted and unsigned
+   SBOMs; also reject a valid signed SBOM without an image signature.
+5. The independent nftables audit counter stays unchanged during the workload.
+   Local IPv6 multicast from creating Pod interfaces is not internet traffic;
+   it remains firewall-blocked but is excluded from the external-packet audit.
+6. Final public IP and unprimed DNS probes fail. DNS checks come after the audit
+   so intentional CoreDNS retries cannot contaminate the workload measurement.
+   PASS appears only after all assertions.
 
 No rejected Pod exists, so there is no Pod Event to show. The exact API response
 and Ratify trace ID are the denial evidence.
@@ -145,10 +162,18 @@ Yes. The host is trusted, and production needs RBAC and privilege/network
 restrictions. This is not a hardened hostile multi-tenant boundary.
 
 **"Could this require an SBOM too?"**  
-Yes, but not merely the presence of arbitrary SBOM bytes. Bind verified SBOM
-evidence to the image digest and require both that evidence and the image
-signature. The README marks that and cosign-referrer experiments as untested
-stretch goals, not working features.
+Yes: run the tested SBOM profile. The custom Rego requires a valid image
+signature AND an SPDX artifact with a trusted nested signature bound through
+OCI subject digests. The chart's default policy alone does not require an SBOM.
+This is a signed artifact, not a DSSE statement or proof of inventory accuracy.
+The SPDX verifier is alpha; do not sell this demo as a production certification.
+
+**"Does cosign still need public infrastructure?"**
+
+Not in this profile: Ratify trusts a staged public key with log verification
+disabled, and signing does not upload to a log. The tested cosign 2.4.3 OCI mode
+is experimental and pinned for Ratify compatibility; this is not a test of
+cosign v3/keyless bundles. Removing certificates does not remove trust custody.
 
 ## Finish and recovery
 

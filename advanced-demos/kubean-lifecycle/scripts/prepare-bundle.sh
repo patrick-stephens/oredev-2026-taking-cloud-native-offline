@@ -30,7 +30,14 @@ download_release_asset() {
     exit 1
   }
 
+  if [[ -s "$directory/$asset" ]] &&
+    printf '%s  %s\n' "$expected" "$directory/$asset" | sha256sum --check --status; then
+    printf 'Already verified: %s/%s\n' "$version" "$asset"
+    return
+  fi
+
   temporary="$directory/$asset.partial"
+  rm -f -- "$temporary"
   curl --fail --location --retry 3 --silent --show-error \
     "https://github.com/kubean-io/kubean/releases/download/$version/$asset" \
     --output "$temporary"
@@ -88,28 +95,33 @@ prepare_kubean_release "$UPGRADE_KUBEAN_VERSION"
 
 echo "Pulling the current stable Apache httpd 2.4 image and pinned local artifact services."
 docker pull "$HTTPD_IMAGE"
+docker pull "$BUSYBOX_IMAGE"
 docker pull "$REGISTRY_IMAGE"
 docker pull "$FILES_IMAGE"
 docker image save --output "$ARTIFACTS/httpd-offline.tar" "$HTTPD_IMAGE"
+docker image save --output "$ARTIFACTS/busybox-offline.tar" "$BUSYBOX_IMAGE"
 docker image save --output "$ARTIFACTS/artifact-services.tar" \
   "$REGISTRY_IMAGE" "$FILES_IMAGE"
-docker image inspect "$HTTPD_IMAGE" --format '{{index .RepoDigests 0}}' \
-  > "$ARTIFACTS/httpd-image-ref.txt"
-grep -Eq '^docker\.io/library/httpd@sha256:[[:xdigit:]]{64}$' \
-  "$ARTIFACTS/httpd-image-ref.txt" || {
+httpd_repo_digest="$(docker image inspect "$HTTPD_IMAGE" --format '{{index .RepoDigests 0}}')"
+httpd_digest="${httpd_repo_digest##*@}"
+if [[ ! "$httpd_repo_digest" =~ (^|/)httpd@sha256:[[:xdigit:]]{64}$ ]] ||
+  [[ ! "$httpd_digest" =~ ^sha256:[[:xdigit:]]{64}$ ]]; then
     echo "ERROR: Docker did not report a digest for $HTTPD_IMAGE" >&2
     exit 1
-  }
+fi
+printf 'docker.io/library/httpd@%s\n' "$httpd_digest" > "$ARTIFACTS/httpd-image-ref.txt"
 
 (
   cd "$ARTIFACTS"
-  find kubean -type f -print0
-  printf '%s\0' httpd-offline.tar artifact-services.tar httpd-image-ref.txt
-) | sort -z | xargs -0 sha256sum > "$ARTIFACTS/SHA256SUMS"
+  {
+    find kubean -type f -print0
+    printf '%s\0' httpd-offline.tar busybox-offline.tar artifact-services.tar httpd-image-ref.txt
+  } | sort -z | xargs -0 sha256sum > SHA256SUMS
+)
 
 temporary="$ARTIFACTS/kubean-lifecycle-bundles.tar.gz.partial"
 tar -czf "$temporary" -C "$ARTIFACTS" \
-  kubean httpd-offline.tar artifact-services.tar httpd-image-ref.txt SHA256SUMS
+  kubean httpd-offline.tar busybox-offline.tar artifact-services.tar httpd-image-ref.txt SHA256SUMS
 mv -- "$temporary" "$ARTIFACTS/kubean-lifecycle-bundles.tar.gz"
 
 printf 'Bundle: %s\n' "$ARTIFACTS/kubean-lifecycle-bundles.tar.gz"

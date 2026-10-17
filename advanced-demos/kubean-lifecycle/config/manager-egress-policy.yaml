@@ -16,3 +16,5 @@ spec:
             cidr: 10.42.0.0/16
         - ipBlock:
             cidr: 10.43.0.0/16
+        - ipBlock:
+            cidr: 172.18.0.2/32

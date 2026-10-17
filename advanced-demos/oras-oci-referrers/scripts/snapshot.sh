@@ -14,11 +14,12 @@ curl --noproxy '*' -fsS "http://localhost:5000/v2/demo/alpine/referrers/$subject
 jq -e '
   .schemaVersion == 2 and
   .mediaType == "application/vnd.oci.image.index.v1+json" and
-  (.manifests | length == 3) and
+  (.manifests | length == 4) and
   ([.manifests[].artifactType] | sort) == ([
     "application/spdx+json",
     "application/vnd.offline-demo.policy.v1+json",
-    "application/vnd.offline-demo.model.v1"
+    "application/vnd.offline-demo.model.v1",
+    "application/vnd.dev.sigstore.bundle.v0.3+json"
   ] | sort)
 ' "$output/referrers.json" >/dev/null
 printf '%s\n' "$subject" > "$output/digests.txt"

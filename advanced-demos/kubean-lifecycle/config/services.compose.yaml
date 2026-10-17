@@ -8,6 +8,7 @@ services:
     volumes:
       - ../.state/registry:/var/lib/registry
     networks:
+      - host-access
       - artifacts
 
   files:
@@ -18,8 +19,13 @@ services:
     volumes:
       - ../.state/files:/usr/share/nginx/html:ro
     networks:
+      - host-access
       - artifacts
 
 networks:
   artifacts:
     internal: true
+  host-access:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"

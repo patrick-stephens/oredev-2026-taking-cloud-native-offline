@@ -51,6 +51,29 @@ bash "$DEMO_DIR/scripts/install-tools.sh"
 require_tools
 cd "$DEMO_DIR"
 umask 077
+if docker container inspect "$NODE" >/dev/null 2>&1; then
+    assert_owned
+    assert_private_keys_unmounted
+fi
+if ! docker image inspect "$COSIGN" >/dev/null 2>&1; then
+    timeout 120s docker pull --platform linux/amd64 "$COSIGN"
+fi
+mkdir -p "$KEYS"
+chmod 700 "$KEYS"
+if [[ ! -e "$KEYS/cosign.key" && ! -e "$KEYS/cosign.pub" && ! -e "$KEYS/password" ]]; then
+    head -c 32 /dev/urandom | base64 > "$KEYS/password"
+    COSIGN_PASSWORD="$(<"$KEYS/password")" docker run --rm --network none \
+        --user "$(id -u):$(id -g)" --env COSIGN_PASSWORD --env HOME=/tmp \
+        --mount "type=bind,src=$KEYS,dst=/keys" --workdir /keys \
+        "$COSIGN" generate-key-pair
+fi
+[[ -s "$KEYS/cosign.key" && -s "$KEYS/cosign.pub" && -s "$KEYS/password" ]] ||
+    die "Incomplete keys/ identity; restore the original keypair/password instead of rotating trust."
+COSIGN_PASSWORD="$(<"$KEYS/password")" docker run --rm --network none \
+    --user "$(id -u):$(id -g)" --env COSIGN_PASSWORD --env HOME=/tmp \
+    --mount "type=bind,src=$KEYS,dst=/keys,readonly" "$COSIGN" \
+    public-key --key /keys/cosign.key > "$STATE/derived.pub"
+cmp "$STATE/derived.pub" "$KEYS/cosign.pub" || die "Signing keypair does not match."
 if [[ ! -s "$ARTIFACTS/$INIT" ]]; then
     curl -fLsS --retry 3 --max-time 180 \
         "https://github.com/zarf-dev/zarf/releases/download/v0.88.0/$INIT" -o "$ARTIFACTS/$INIT"
@@ -62,9 +85,15 @@ curl -fLsS --retry 3 --max-time 30 \
     cd "$ARTIFACTS"
     grep " $INIT\$" checksums.txt | sha256sum --check -
 )
-"$TOOLS/zarf" package create "$DEMO_DIR/zarf-config.yaml" --confirm \
+ZARF_PACKAGE_CREATE_SIGNING_KEY_PASSWORD="$(<"$KEYS/password")" \
+    "$TOOLS/zarf" package create "$DEMO_DIR/zarf-config.yaml" --confirm \
+    --signing-key "$KEYS/cosign.key" --tlog-upload=false \
     --output "$ARTIFACTS" --cache "$STATE/cache" --no-color
+"$TOOLS/zarf" package verify "$ARTIFACTS/$PACKAGE" --key "$KEYS/cosign.pub" --no-color
+printf 'SIGNED: package verified with the build-side public key. Enroll this key independently:\n'
+sha256sum "$KEYS/cosign.pub"
 "$TOOLS/zarf" package inspect sbom "$ARTIFACTS/$PACKAGE" \
+    --verify=always --key "$KEYS/cosign.pub" \
     --output "$ARTIFACTS/sbom-connected" --no-color
 jq '{name:"ghcr.io/stefanprodan/podinfo:6.15.0",packages:(.artifacts|length)}' \
     "$ARTIFACTS/sbom-connected/podinfo-offline/ghcr.io_stefanprodan_podinfo_6.15.0.json"
@@ -91,9 +120,12 @@ else
         --k3s-arg '--kubelet-arg=eviction-hard=nodefs.available<2Gi,imagefs.available<2Gi,nodefs.inodesFree<1%,imagefs.inodesFree<1%@server:0' \
         --k3s-arg '--kubelet-arg=image-gc-high-threshold=99@server:0' \
         --k3s-arg '--kubelet-arg=image-gc-low-threshold=98@server:0' \
-        --volume "$DEMO_DIR:/work@server:0" --timeout 120s
+        --volume "$TOOLS:/work/.tools:ro@server:0" \
+        --volume "$DEMO_DIR/config:/work/config:ro@server:0" \
+        --volume "$ARTIFACTS:/work/artifacts@server:0" --timeout 120s
     docker inspect --format '{{.Id}}' "$NODE" > "$STATE/node-id"
 fi
+assert_private_keys_unmounted
 "$TOOLS/k3d" kubeconfig get "$CLUSTER" > "$STATE/kubeconfig"
 wait_for_bootstrap
 kube get node "$NODE" -o json | jq -e \

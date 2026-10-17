@@ -11,6 +11,8 @@ NODE=k3d-zarf-lifecycle-server-0
 PACKAGE=zarf-package-podinfo-offline-amd64-6.15.0.tar.zst
 INIT=zarf-init-amd64-v0.88.0.tar.zst
 NODE_IMAGE=rancher/k3s:v1.35.5-k3s1
+COSIGN=ghcr.io/sigstore/cosign/cosign:v2.4.3
+KEYS="$DEMO_DIR/keys"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -22,7 +24,7 @@ phase() {
 
 require_tools() {
     local tool
-    for tool in docker curl jq sha256sum awk grep sed timeout; do
+    for tool in docker curl jq sha256sum awk grep sed timeout head base64 cmp realpath; do
         command -v "$tool" >/dev/null || die "Missing required tool: $tool"
     done
     [[ "$(uname -s)/$(uname -m)" == Linux/x86_64 ]] || die "Use a Linux amd64 sandbox."
@@ -39,6 +41,12 @@ assert_owned() {
     [[ -s "$STATE/node-id" ]] || die "No local ownership record; refusing to use a possibly unrelated node."
     [[ "$(docker inspect --format '{{.Id}}' "$NODE")" == "$(<"$STATE/node-id")" ]] ||
         die "Node identity does not match the local ownership record."
+}
+
+assert_private_keys_unmounted() {
+    docker inspect "$NODE" | jq -e --arg keys "$KEYS" --arg demo "$DEMO_DIR" '
+        all(.[0].Mounts[]; .Source != $demo and .Source != $keys)
+    ' >/dev/null || die "Old cluster mount exposes build-side keys. Run cleanup and recreate the target."
 }
 
 target_zarf() {

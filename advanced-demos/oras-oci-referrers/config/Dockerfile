@@ -1,14 +1,17 @@
 ARG ORAS_IMAGE=ghcr.io/oras-project/oras:v1.3.0@sha256:6ce045ce069a89934d6666b8b49f9c4c0145201bd6de6dbe2aee267814c55468
 ARG SYFT_IMAGE=docker.io/anchore/syft:v1.46.0@sha256:473a60e3a58e29aca3aedb3e99e787bb4ef273917e44d10fcbea4330a07320bb
 ARG ALPINE_IMAGE=docker.io/library/alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+ARG COSIGN_IMAGE=ghcr.io/sigstore/cosign/cosign:v3.0.2@sha256:b29487e48205d875c324c79583e2806d9d269c0fa299e0861bbec023d8430c8b
 FROM ${ORAS_IMAGE} AS oras
 FROM ${SYFT_IMAGE} AS syft
+FROM ${COSIGN_IMAGE} AS cosign
 FROM ${ALPINE_IMAGE}
 RUN apk add --no-cache \
     bash=5.3.9-r1 ca-certificates=20260909-r0 curl=8.22.0-r0 jq=1.8.2-r0 \
     iproute2=7.0.0-r0 iptables=1.8.13-r0 coreutils=9.11-r0
 COPY --from=oras /bin/oras /usr/local/bin/oras
 COPY --from=syft /syft /usr/local/bin/syft
+COPY --from=cosign /ko-app/cosign /usr/local/bin/cosign
 ENV HOME=/tmp
 WORKDIR /work
 ENTRYPOINT []

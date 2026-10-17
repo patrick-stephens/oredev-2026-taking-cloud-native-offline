@@ -198,13 +198,46 @@ restore_nat() {
   done
 }
 
-disconnect_nat() {
-  local node domain mac
+isolate_external_egress() {
+  local node address
   for node in cp1 worker1; do
-    domain="$(domain_name "$node")"
-    mac="$(nat_mac "$node")"
-    virsh -c "$LIBVIRT_URI" domif-setlink "$domain" "$mac" down
-    virsh -c "$LIBVIRT_URI" domif-setlink "$domain" "$mac" down --config
+    address="$(guest_ip "$node")"
+    ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
+      -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
+      "vagrant@$address" 'sudo bash -s' <<'REMOTE'
+set -euo pipefail
+
+ensure_chain() {
+  local chain="$1"
+  iptables -N "$chain" 2>/dev/null || true
+  iptables -F "$chain"
+}
+
+ensure_chain KUBEAN-AIRGAP-OUTPUT
+iptables -A KUBEAN-AIRGAP-OUTPUT -o lo -j RETURN
+iptables -A KUBEAN-AIRGAP-OUTPUT -p udp --sport 68 --dport 67 -j RETURN
+iptables -A KUBEAN-AIRGAP-OUTPUT -d 10.0.0.0/8 -j RETURN
+iptables -A KUBEAN-AIRGAP-OUTPUT -d 172.16.0.0/12 -j RETURN
+iptables -A KUBEAN-AIRGAP-OUTPUT -d 192.168.0.0/16 -j RETURN
+iptables -A KUBEAN-AIRGAP-OUTPUT -j REJECT
+iptables -C OUTPUT -j KUBEAN-AIRGAP-OUTPUT 2>/dev/null ||
+  iptables -I OUTPUT 1 -j KUBEAN-AIRGAP-OUTPUT
+
+ensure_chain KUBEAN-AIRGAP-FORWARD
+iptables -A KUBEAN-AIRGAP-FORWARD -s 10.0.0.0/8 -d 10.0.0.0/8 -j RETURN
+iptables -A KUBEAN-AIRGAP-FORWARD -s 10.0.0.0/8 -d 172.16.0.0/12 -j RETURN
+iptables -A KUBEAN-AIRGAP-FORWARD -s 10.0.0.0/8 -d 192.168.0.0/16 -j RETURN
+iptables -A KUBEAN-AIRGAP-FORWARD -s 172.16.0.0/12 -d 10.0.0.0/8 -j RETURN
+iptables -A KUBEAN-AIRGAP-FORWARD -s 172.16.0.0/12 -d 172.16.0.0/12 -j RETURN
+iptables -A KUBEAN-AIRGAP-FORWARD -s 172.16.0.0/12 -d 192.168.0.0/16 -j RETURN
+iptables -A KUBEAN-AIRGAP-FORWARD -s 192.168.0.0/16 -d 10.0.0.0/8 -j RETURN
+iptables -A KUBEAN-AIRGAP-FORWARD -s 192.168.0.0/16 -d 172.16.0.0/12 -j RETURN
+iptables -A KUBEAN-AIRGAP-FORWARD -s 192.168.0.0/16 -d 192.168.0.0/16 -j RETURN
+iptables -A KUBEAN-AIRGAP-FORWARD -j REJECT
+iptables -C FORWARD -j KUBEAN-AIRGAP-FORWARD 2>/dev/null ||
+  iptables -I FORWARD 1 -j KUBEAN-AIRGAP-FORWARD
+REMOTE
+    printf 'Installed idempotent external-egress filters on %s.\n' "$node"
   done
 }
 
@@ -231,11 +264,11 @@ check_isolation() {
     route="$(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
       -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
       "vagrant@$address" 'ip route show default')"
-    [[ -z "$route" ]] || fail "$node still has a default route: $route"
+    [[ -n "$route" ]] || fail "$node has no default route; Kubernetes service routing requires one"
     ipv6_route="$(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
       -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
       "vagrant@$address" 'ip -6 route show default')"
-    [[ -z "$ipv6_route" ]] || fail "$node still has an IPv6 default route: $ipv6_route"
+    [[ -z "$ipv6_route" ]] || fail "$node has an IPv6 default route: $ipv6_route"
     if ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
       -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
       "vagrant@$address" 'timeout 5 bash -c "</dev/tcp/1.1.1.1/443"' >/dev/null 2>&1; then
@@ -247,7 +280,12 @@ check_isolation() {
       >/dev/null 2>&1; then
       fail "$node reached an external IPv6 address during the air-gapped phase"
     fi
-    printf 'Expected isolation: %s has no IPv4/IPv6 default route and cannot reach public IPv4/IPv6 probes.\n' "$node"
+    ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
+      -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
+      "vagrant@$address" \
+      'curl --fail --silent --show-error --connect-timeout 5 http://192.168.56.1:8080/kubean/ubuntu/v0.34.2/Packages.gz -o /dev/null' ||
+      fail "$node cannot reach the private local artifact service"
+    printf 'Expected isolation: %s retains its private route, reaches local artifacts, and cannot reach public probes.\n' "$node"
   done
 }
 
@@ -271,11 +309,11 @@ destroy() {
 case "${1:-}" in
   up) up ;;
   check-connected) check_connected ;;
-  disconnect-nat) disconnect_nat ;;
+  isolate-egress) isolate_external_egress ;;
   check-isolation) check_isolation ;;
   destroy) destroy ;;
   *)
-    echo "Usage: $0 {up|check-connected|disconnect-nat|check-isolation|destroy}" >&2
+    echo "Usage: $0 {up|check-connected|isolate-egress|check-isolation|destroy}" >&2
     exit 2
     ;;
 esac

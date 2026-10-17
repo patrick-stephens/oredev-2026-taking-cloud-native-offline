@@ -1,0 +1,45 @@
+apiVersion: config.ratify.deislabs.io/v1beta1
+kind: Policy
+metadata:
+  name: ratify-policy
+spec:
+  type: rego-policy
+  parameters:
+    passthroughEnabled: false
+    policy: |
+      package ratify.policy
+
+      default valid := false
+
+      valid {
+        image_signature
+        signed_sbom
+        not failed_verifier
+      }
+
+      image_signature {
+        report := input.verifierReports[_]
+        report.artifactType == "application/vnd.cncf.notary.signature"
+        report.verifierReports[_].isSuccess == true
+      }
+
+      signed_sbom {
+        report := input.verifierReports[_]
+        report.artifactType == "application/spdx+json"
+        report.verifierReports[_].isSuccess == true
+        signature := report.nestedReports[_]
+        signature.artifactType == "application/vnd.cncf.notary.signature"
+        signature.verifierReports[_].isSuccess == true
+      }
+
+      failed_verifier {
+        [path, value] := walk(input)
+        path[count(path) - 1] == "isSuccess"
+        value == false
+      }
+
+      failed_verifier {
+        [path, value] := walk(input)
+        path[count(path) - 1] == "verifierReports"
+        count(value) == 0
+      }

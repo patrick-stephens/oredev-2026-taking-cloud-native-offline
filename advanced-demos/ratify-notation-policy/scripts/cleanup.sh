@@ -15,4 +15,4 @@ for network in "$UPLINK" "$INTERNAL"; do
   fi
 done
 echo "Removed only this demo's cluster, registry and networks."
-echo "Retained $STATE and $BUNDLE (contain demo secrets; ignored by Git)."
+echo "Retained $ROOT/.state (private demo state) and $ROOT/bundle (public trust exports) for all profiles; ignored by Git."

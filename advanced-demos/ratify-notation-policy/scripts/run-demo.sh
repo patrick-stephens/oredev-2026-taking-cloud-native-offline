@@ -1,10 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ $# == 1 && $1 == --all ]]; then
+  START=$SECONDS
+  for profile in notation cosign sbom; do
+    DEMO_PROFILE="$profile" "$0"
+  done
+  echo "PASS: all three profiles; total runtime $((SECONDS-START)) seconds"
+  exit 0
+fi
+[[ $# == 0 ]] || { echo "Usage: $0 [--all]; DEMO_PROFILE=notation|cosign|sbom" >&2; exit 1; }
 # shellcheck source=common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+# shellcheck source=profiles.sh
+source "$ROOT/scripts/profiles.sh"
 umask 077
 START=$SECONDS
-mkdir -p "$STATE/bin" "$STATE/evidence" "$STATE/docker" "$BUNDLE/truststore/x509/ca/offline-demo"
+mkdir -p "$STATE/bin" "$STATE/evidence" "$STATE/docker" "$BUNDLE"
+if [[ $PROFILE != cosign ]]; then mkdir -p "$BUNDLE/truststore/x509/ca/offline-demo"; fi
 rm -f "$STATE/evidence/result.txt"
 trap 'rc=$?; if (( rc != 0 )); then echo "FAILED after $((SECONDS-START))s; resources retained for diagnosis. Run scripts/cleanup.sh." >&2; fi' EXIT
 for tool in docker kind helm curl jq openssl sha256sum tar timeout clear \
@@ -14,19 +26,20 @@ for tool in docker kind helm curl jq openssl sha256sum tar timeout clear \
 [[ $(helm version --short) == "$HELM_VERSION"* ]] || fail "Install Helm $HELM_VERSION"
 docker info >/dev/null
 
-phase '1: CONNECTED - acquire pinned tools, charts and images'
+phase "1: CONNECTED - acquire pinned tools, charts and images ($PROFILE)"
 "$ROOT/scripts/cleanup.sh"
-if [[ ! -x "$STATE/bin/notation" ]]; then
+if [[ $PROFILE != cosign ]]; then
   base="https://github.com/notaryproject/notation/releases/download/v$NOTATION_VERSION"
   archive="notation_${NOTATION_VERSION}_linux_amd64.tar.gz"
-  curl --noproxy '*' -fSL "$base/$archive" -o "$STATE/$archive"
-  curl --noproxy '*' -fSL "$base/notation_${NOTATION_VERSION}_checksums.txt" -o "$STATE/notation-checksums.txt"
-  (cd "$STATE"; grep " $archive\$" notation-checksums.txt | sha256sum -c -)
+  if [[ ! -f "$STATE/$archive" ]]; then
+    curl --noproxy '*' -fSL "$base/$archive" -o "$STATE/$archive"
+  fi
   echo "$NOTATION_SHA256  $STATE/$archive" | sha256sum -c -
   tar -xzf "$STATE/$archive" -C "$STATE/bin" notation
+  notation version | tee "$STATE/evidence/notation-version.txt"
+  notation version | grep -Fq "Version:     $NOTATION_VERSION" || fail "Unexpected Notation version"
 fi
-notation version | tee "$STATE/evidence/notation-version.txt"
-notation version | grep -Fq "Version:     $NOTATION_VERSION" || fail "Unexpected Notation version"
+download_profile_tools
 curl --noproxy '*' -fSL \
   "https://notaryproject.github.io/ratify/ratify-$RATIFY_CHART_VERSION.tgz" \
   -o "$STATE/ratify.tgz"
@@ -46,8 +59,16 @@ docker build --network=none --pull=false --build-arg "APP_IMAGE=$APP_IMAGE" \
 docker save "$APP_IMAGE" -o "$STATE/original.tar"
 docker save offline-ratify-httpbin:modified -o "$STATE/modified.tar"
 docker save offline-ratify-httpbin:unsigned -o "$STATE/unsigned.tar"
+if [[ $PROFILE == sbom ]]; then
+  for tag in missing-sbom wrong-subject-sbom untrusted-sbom unsigned-sbom unsigned-with-sbom; do
+    docker build --network=none --pull=false --build-arg "APP_IMAGE=$APP_IMAGE" \
+      --build-arg "VARIANT=$tag" -f "$ROOT/config/Dockerfile.variant" \
+      -t "offline-ratify-httpbin:$tag" "$ROOT/config"
+    docker save "offline-ratify-httpbin:$tag" -o "$STATE/$tag.tar"
+  done
+fi
 
-phase '2: CONNECTED - local zot, three tags, Notation trust bundle'
+phase "2: CONNECTED - local zot, signed fixtures and trust bundle ($PROFILE)"
 docker network create --internal --subnet 172.30.87.0/24 "$INTERNAL" >/dev/null
 docker network create --subnet 172.30.88.0/24 "$UPLINK" >/dev/null
 openssl rand -hex 24 >"$STATE/registry-password"
@@ -67,23 +88,17 @@ timeout 45 bash -c 'until curl --noproxy "*" -fsS -u "presenter:$1" "http://$2/v
 for tag in signed tampered; do registry_copy original "$tag"; done
 registry_copy unsigned unsigned
 
-# Only these generated, demo-owned paths are replaced on a fresh run.
-rm -f "$STATE/xdg/notation/localkeys/offline-demo.crt" \
-  "$STATE/xdg/notation/localkeys/offline-demo.key" \
-  "$STATE/xdg/notation/signingkeys.json" \
-  "$STATE/xdg/notation/truststore/x509/ca/offline-demo/offline-demo.crt"
-notation cert generate-test --default offline-demo
-cp "$STATE/xdg/notation/localkeys/offline-demo.crt" "$BUNDLE/truststore/x509/ca/offline-demo/root.crt"
-cp "$ROOT/config/trustPolicy.json" "$BUNDLE/trustPolicy.json"
-jq '{notation:{trustPolicies:[.trustPolicies[] |
-  {name,level:.signatureVerification.level,registryScopes,trustedIdentities,trustStores:[]}]}}' \
-  "$BUNDLE/trustPolicy.json" >"$STATE/trust-values.json"
-notation policy import --force "$BUNDLE/trustPolicy.json"
-printf '%s' "$PASSWORD" | notation login --insecure-registry --username presenter --password-stdin "$ENDPOINT"
-notation sign --insecure-registry "$REPOSITORY:signed"
-notation verify --insecure-registry "$REPOSITORY:signed"
-notation verify --insecure-registry "$REPOSITORY:tampered"
+if [[ $PROFILE == cosign ]]; then prepare_cosign; else prepare_notation; fi
+sign_image "$REPOSITORY:signed"
+verify_image "$REPOSITORY:signed"
+verify_image "$REPOSITORY:tampered"
 registry_copy modified tampered
+if [[ $PROFILE == sbom ]]; then
+  prepare_sboms
+  jq '.sbom={enabled:true,notaryProjectSignatureRequired:true}' "$STATE/trust-values.json" \
+    >"$STATE/sbom-values.json"
+  mv "$STATE/sbom-values.json" "$STATE/trust-values.json"
+fi
 for tag in signed unsigned tampered; do
   curl --noproxy '*' -fsS -u "presenter:$PASSWORD" \
     -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
@@ -102,6 +117,20 @@ diff <(jq '.layers' "$STATE/evidence/signed-manifest.json") \
 [[ $(jq '.layers | length' "$STATE/evidence/tampered-manifest.json") \
    -eq $(($(jq '.layers | length' "$STATE/evidence/signed-manifest.json") + 1)) ]] \
   || fail "Tamper build must add exactly one filesystem layer"
+if [[ $PROFILE != notation ]]; then
+  record_referrers "$SIGNED_DIGEST" signed
+  if [[ $PROFILE == cosign ]]; then
+    jq -e '.manifests | any(.artifactType == "application/vnd.dev.cosign.artifact.sig.v1+json")' \
+      "$STATE/evidence/signed-referrers.json" >/dev/null || fail "Cosign signature is not an OCI referrer"
+    curl --noproxy '*' -fsS -u "presenter:$PASSWORD" "http://$ENDPOINT/v2/demo/httpbin/tags/list" \
+      >"$STATE/evidence/registry-tags.json"
+    jq -e '[.tags[] | select(test("^sha256-.*[.]sig$"))] | length == 0' \
+      "$STATE/evidence/registry-tags.json" >/dev/null || fail "Legacy cosign tag fallback detected"
+  else
+    jq -e '.manifests | any(.artifactType == "application/spdx+json")' \
+      "$STATE/evidence/signed-referrers.json" >/dev/null || fail "Missing SPDX OCI referrer"
+  fi
+fi
 
 phase '3: CONNECTED - install policy-enforcing cluster and Ratify'
 export KIND_EXPERIMENTAL_DOCKER_NETWORK="$UPLINK"
@@ -125,10 +154,13 @@ done
 
 helm template gatekeeper "$STATE/gatekeeper-$GATEKEEPER_CHART_VERSION.tgz" --skip-tests \
   -n gatekeeper-system -f "$ROOT/config/gatekeeper-values.yaml" >"$STATE/gatekeeper-rendered.yaml"
+trust_args=(-f "$STATE/trust-values.json")
+if [[ $PROFILE != cosign ]]; then
+  trust_args+=(--set-file "notationCerts[0]=$BUNDLE/truststore/x509/ca/offline-demo/root.crt")
+fi
 helm template ratify "$STATE/ratify.tgz" --skip-tests -n gatekeeper-system \
   -f "$ROOT/config/ratify-values.yaml" \
-  -f "$STATE/trust-values.json" \
-  --set-file "notationCerts[0]=$BUNDLE/truststore/x509/ca/offline-demo/root.crt" >"$STATE/ratify-rendered.yaml"
+  "${trust_args[@]}" >"$STATE/ratify-rendered.yaml"
 mapfile -t policy_images < <(sed -nE 's/^[[:space:]]*image: ([^ ]+)[[:space:]]*$/\1/p' \
   "$STATE/gatekeeper-rendered.yaml" "$STATE/ratify-rendered.yaml" | tr -d "\"'" | sort -u)
 [[ ${#policy_images[@]} -gt 0 ]] || fail "No policy images discovered in pinned charts"
@@ -142,14 +174,22 @@ helm install gatekeeper "$STATE/gatekeeper-$GATEKEEPER_CHART_VERSION.tgz" \
   -n gatekeeper-system -f "$ROOT/config/gatekeeper-values.yaml" --wait --timeout 5m
 helm install ratify "$STATE/ratify.tgz" -n gatekeeper-system \
   -f "$ROOT/config/ratify-values.yaml" \
-  -f "$STATE/trust-values.json" \
-  --set-file "notationCerts[0]=$BUNDLE/truststore/x509/ca/offline-demo/root.crt" --wait --timeout 5m
+  "${trust_args[@]}" --wait --timeout 5m
 k -n gatekeeper-system patch serviceaccount ratify-admin \
   -p '{"imagePullSecrets":[{"name":"registry-credentials"}]}'
-k get verifier verifier-notation -o json | jq '.spec.parameters.trustPolicyDoc' \
-  >"$STATE/evidence/deployed-trustPolicy.json"
-diff <(jq -S '.trustPolicies[].trustStores=["ca:certs"]' "$BUNDLE/trustPolicy.json") \
-  <(jq -S . "$STATE/evidence/deployed-trustPolicy.json")
+if [[ $PROFILE == cosign ]]; then
+  k get verifier verifier-cosign -o json >"$STATE/evidence/deployed-cosign-verifier.json"
+  jq -e '.spec.parameters.trustPolicies[0].tLogVerify == false' \
+    "$STATE/evidence/deployed-cosign-verifier.json" >/dev/null
+  [[ $(k get verifier verifier-notation --ignore-not-found -o name) == "" ]] \
+    || fail "Cosign profile unexpectedly has a Notation verifier"
+else
+  k get verifier verifier-notation -o json | jq '.spec.parameters.trustPolicyDoc' \
+    >"$STATE/evidence/deployed-trustPolicy.json"
+  diff <(jq -S '.trustPolicies[].trustStores=["ca:certs"]' "$BUNDLE/trustPolicy.json") \
+    <(jq -S . "$STATE/evidence/deployed-trustPolicy.json")
+fi
+if [[ $PROFILE == sbom ]]; then k apply -f - <"$ROOT/manifests/sbom-policy.yaml"; fi
 k apply -f - <"$ROOT/manifests/admission.yaml"
 k wait --for=create crd/offlinesignature.constraints.gatekeeper.sh --timeout=60s
 k wait --for=condition=Established crd/offlinesignature.constraints.gatekeeper.sh --timeout=60s
@@ -190,6 +230,30 @@ ip6tables -P OUTPUT DROP
 ip6tables -P FORWARD DROP
 ip route add 10.96.0.0/16 dev lo
 ip route del default
+nft -f - <<NFT
+table inet offline_audit {
+  counter external {}
+  set external4 { type ipv4_addr; flags dynamic; counter; }
+  set external6 { type ipv6_addr; flags dynamic; counter; }
+  chain destinations {
+    ip daddr 127.0.0.11 counter name external return
+    ip daddr { 127.0.0.0/8, 10.244.0.0/16, 10.96.0.0/16, 172.30.87.2/32, $1/32 } return
+    ip6 daddr ::1 return
+    ip6 daddr ff02::/16 return
+    meta nfproto ipv4 update @external4 { ip daddr counter }
+    meta nfproto ipv6 update @external6 { ip6 daddr counter }
+    counter name external
+  }
+  chain output {
+    type filter hook output priority -10; policy accept;
+    jump destinations
+  }
+  chain forward {
+    type filter hook forward priority -10; policy accept;
+    jump destinations
+  }
+}
+NFT
 FIREWALL
 phase '5: AIR-GAPPED - node firewall sealed, no default route, local trust only'
 docker network inspect "$INTERNAL" >"$STATE/evidence/internal-network.json"
@@ -203,9 +267,6 @@ if grep -q '^default' "$STATE/evidence/node-routes.txt"; then fail "Node still h
 expect_blocked node-offline-external docker exec "$NODE" curl --noproxy '*' -fsS \
   --connect-timeout 2 --max-time 5 https://1.1.1.1/cdn-cgi/trace
 expect_blocked pod-offline-external probe https://1.1.1.1/cdn-cgi/trace
-expect_dns_blocked node-offline-public-dns docker exec "$NODE" curl --noproxy '*' -fsS \
-  --connect-timeout 2 --max-time 5 https://example.com
-expect_dns_blocked pod-offline-public-dns probe https://example.com
 probe "http://$ENDPOINT/v2/" -u "presenter:$PASSWORD" >"$STATE/evidence/registry-offline.txt"
 # Probe the verifier's real network namespace without modifying its image.
 RATIFY_POD="$(k -n gatekeeper-system get pods -l app.kubernetes.io/name=ratify -o jsonpath='{.items[0].metadata.name}')"
@@ -215,7 +276,9 @@ expect_blocked ratify-offline-external docker exec "$NODE" nsenter -t "$RATIFY_P
   curl --noproxy '*' -fsS --connect-timeout 2 --max-time 5 https://1.1.1.1/cdn-cgi/trace
 docker exec "$NODE" iptables-save >"$STATE/evidence/iptables.txt"
 
-phase '6: AIR-GAPPED - signed allowed, unsigned and overwritten tag denied'
+phase "6: AIR-GAPPED - signed allowed, missing/untrusted evidence denied ($PROFILE)"
+# A separate nft table survives kube-router's periodic iptables counter resets.
+docker exec "$NODE" nft -j list counter inet offline_audit external >"$STATE/evidence/workload-firewall-before.json"
 pod httpbin-signed signed
 k -n offline-demo wait --for=condition=Ready pod/httpbin-signed --timeout=120s
 ACTUAL_IMAGE="$(k -n offline-demo get pod httpbin-signed -o jsonpath='{.spec.containers[0].image}')"
@@ -225,17 +288,22 @@ APP_IP="$(k -n offline-demo get pod httpbin-signed -o jsonpath='{.status.podIP}'
 probe "http://$APP_IP:8080/get?demo=offline" | tee "$STATE/evidence/httpbin-response.json"
 jq -e '.args.demo == ["offline"]' "$STATE/evidence/httpbin-response.json" >/dev/null
 for tag in unsigned tampered; do
-  rc=0
-  pod "httpbin-$tag" "$tag" >"$STATE/evidence/$tag-denial.txt" 2>&1 || rc=$?
-  cat "$STATE/evidence/$tag-denial.txt"
-  (( rc != 0 )) || fail "$tag was unexpectedly admitted"
-  grep -F 'admission webhook "validation.gatekeeper.sh" denied' "$STATE/evidence/$tag-denial.txt" >/dev/null \
-    || fail "$tag failed for a reason other than validating admission"
-  grep -F 'Offline signature required:' "$STATE/evidence/$tag-denial.txt" >/dev/null \
-    || fail "$tag did not fail signature verification"
-  [[ $(k -n offline-demo get pods "httpbin-$tag" --ignore-not-found -o name) == "" ]] \
-    || fail "Rejected Pod exists: $tag"
+  expect_denied "httpbin-$tag" "$tag"
 done
+if [[ $PROFILE == sbom ]]; then
+  for tag in missing-sbom wrong-subject-sbom untrusted-sbom unsigned-sbom unsigned-with-sbom; do
+    expect_denied "httpbin-$tag" "$tag"
+  done
+fi
+docker exec "$NODE" nft -j list counter inet offline_audit external >"$STATE/evidence/workload-firewall-after.json"
+diff <(jq '[.nftables[].counter? // empty | {packets,bytes}]' "$STATE/evidence/workload-firewall-before.json") \
+  <(jq '[.nftables[].counter? // empty | {packets,bytes}]' "$STATE/evidence/workload-firewall-after.json") \
+  || { docker exec "$NODE" nft list table inet offline_audit; fail "Unexpected external packets during admission workload"; }
+# DNS negative probes can leave CoreDNS retrying after curl exits; run them only
+# after the workload audit so those intentional retries cannot contaminate it.
+expect_dns_blocked node-offline-public-dns docker exec "$NODE" curl --noproxy '*' -fsS \
+  --connect-timeout 2 --max-time 5 "https://offline-$RANDOM.example.com"
+expect_dns_blocked pod-offline-public-dns probe "https://offline-$RANDOM.example.com"
 expect_blocked node-offline-final docker exec "$NODE" curl --noproxy '*' -fsS \
   --connect-timeout 2 --max-time 5 https://1.1.1.1/cdn-cgi/trace
 expect_blocked pod-offline-final probe https://1.1.1.1/cdn-cgi/trace
@@ -245,6 +313,7 @@ docker logs "$REGISTRY" >"$STATE/evidence/zot.log" 2>&1
 {
   echo "PASS: signed allowed and digest-pinned; unsigned denied; tampered denied."
   echo "PASS: go-httpbin /get served locally; pod, verifier and node external access blocked."
+  echo "PASS: $PROFILE profile; no external packets observed by node audit during admission workload."
   echo "Runtime: $((SECONDS-START)) seconds"
   echo "Completed: $(date -u +%FT%TZ)"
   docker version --format 'Docker client={{.Client.Version}} server={{.Server.Version}}'

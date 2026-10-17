@@ -2,16 +2,18 @@
 
 | Spectrum level | Demo app | Headline tooling | Status |
 |----------------|----------|------------------|--------|
-| 3 | alpine | oras, zot, syft | Verified 2026-10-17 |
+| 3 | alpine | oras, zot, syft, cosign | Verified 2026-10-17 |
 
-OCI 1.1 artifact graph (SBOM, policy, model) travels offline intact
+OCI 1.1 artifact graph (SBOM, policy, model, signature) travels offline intact
 
 [Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
 
 An image mirror is incomplete when the deployment also needs its SBOM, policy,
 signature or model data. This demo takes the official stable **Alpine 3.24.2**
-image, attaches three small artifacts, exports their graph as an OCI layout, and
-reconstructs it in a fresh, isolated zot registry. No remote repositories are
+image, attaches three small artifacts and a Cosign signature, exports their graph
+as an OCI layout, and reconstructs it in a fresh, isolated zot registry.
+Cosign verifies the image with a local public key, without contacting Sigstore
+services. No remote repositories are
 created, forked or pushed; the only pushes are into disposable local registries.
 
 **Offline spectrum: level 3.** See the shared [offline spectrum](../../docs/offline-spectrum.md).
@@ -53,10 +55,11 @@ CONNECTED
                      v
   connected zot <--> ORAS + Syft client (same network namespace)
   demo/alpine@sha256:IMAGE
-       ^ subject     ^ subject       ^ subject
-       |             |               |
-       SBOM          policy.json     model.bin (1024 fake bytes)
-       SPDX JSON     metadata only   NOT a real ModelKit
+       ^ subject     ^ subject       ^ subject          ^ subject
+       |             |               |                  |
+       SBOM          policy.json     model.bin          Cosign bundle
+       SPDX JSON     metadata only   1024 fake bytes    key-only signature
+                                     NOT a ModelKit
                      |
               oras copy --recursive --to-oci-layout
                      v
@@ -74,7 +77,8 @@ AIR-GAPPED
                  IPv4/IPv6 OUTPUT allows only ::1 / 127.0.0.1
                  all other output REJECTed, including embedded DNS
                                |
-                 discover + pull ALL three artifacts
+                 discover + pull all three data artifacts
+                 Cosign fetches and verifies the signature referrer
                  compare digests, graph and original bytes
 ```
 
@@ -93,7 +97,7 @@ the upstream multi-architecture index** or Docker Hub's own attestation graph.
   tested), and permission to grant a short-lived helper `NET_ADMIN`.
   Full `--privileged`, host networking and host firewall changes are not used.
 - Host Bash 4+, `flock`, `jq`, `diff`, `sha256sum`, `date`, `du`, `sleep`, and
-  `clear` for interactive terminals. No host ORAS, Syft or Compose is required.
+  `clear` for interactive terminals. No host ORAS, Syft, Cosign or Compose is required.
 - About 1 GB free Docker storage for tools and builds. The actual transferable
   graph is about 3.9 MiB; tool images are not part of that layout.
 - CONNECTED access to Docker Hub (auth service and blob CDN), GHCR, and Alpine
@@ -132,7 +136,7 @@ registries, and retains previous evidence in separate run directories.
 
 ### CONNECTED: phases 1–3
 
-1. Build the tools container from digest-pinned Alpine, ORAS and Syft images;
+1. Build the tools container from digest-pinned Alpine, ORAS, Syft and Cosign images;
    pull the digest-pinned zot image. Direct APK tool versions are pinned in
    [config/Dockerfile](config/Dockerfile). Its image defaults also support
    standalone builds; keep them aligned with [versions.env](config/versions.env)
@@ -149,10 +153,16 @@ registries, and retains previous evidence in separate run directories.
    These custom demo media types are not industry standards. The policy
    illustrates distribution, not admission enforcement; the blob hints at
    KitOps/ModelKit distribution without claiming to implement its format.
-5. Display the tree (`oras discover --format tree`, the ORAS 1.3 spelling of
+5. Generate ephemeral signing and wrong-key test keypairs on the tools
+   container's `/tmp` tmpfs. Save only their public keys under the ignored
+   run directory's `trust/`; private keys disappear when that container exits.
+   Sign the image digest with Cosign's native Sigstore bundle format, with
+   `--tlog-upload=false --use-signing-config=false`. The fourth referrer has type
+   `application/vnd.dev.sigstore.bundle.v0.3+json`. Verify it before export.
+6. Display the tree (`oras discover --format tree`, the ORAS 1.3 spelling of
    the deprecated `-o tree`) and the raw referrers endpoint. Record manifest
    digests, subject edges, descriptor metadata and recursive discovery JSON.
-6. Export using:
+7. Export using:
 
    ```bash
    oras copy --recursive --from-plain-http \
@@ -183,12 +193,14 @@ registries, and retains previous evidence in separate run directories.
      /work/bundle:alpine localhost:5000/demo/alpine:alpine-3.24.2
    ```
 
-5. Verify the resolved image digest and all three referrer manifest digests;
+5. Verify the resolved image digest and all four referrer manifest digests;
    hash fetched manifest bytes and verify each artifact's `subject.digest`.
    Compare complete sorted descriptors and canonical recursive discovery trees.
    Pull **all three artifacts** from isolated zot and byte-compare each payload
-   against its original. Finally require **zero IPv4 and IPv6 non-local REJECT
-   hits during import, discovery and pull**. A blocked packet during the
+   against its original. Cosign fetches the fourth referrer from isolated zot,
+   verifies it with the public key, and rejects the wrong key. Finally require
+   **zero IPv4 and IPv6 non-local REJECT hits during import, discovery, pull and
+   signature verification**. A blocked packet during the
    workload is a failure even if the command later succeeds using local data.
 
 Raw tree sibling order is not stable: the API does not promise an ordering.
@@ -202,20 +214,22 @@ a match.
 Illustrative output, with full digests in the real run:
 
 ```text
-=== PHASE 2 / CONNECTED: build the image + SBOM + policy + fake model graph ===
+=== PHASE 2 / CONNECTED: build and sign the image + SBOM + policy + fake model graph ===
 localhost:5000/demo/alpine@sha256:d56c381f...
 +-- application/spdx+json                         -> sha256:SBOM
 +-- application/vnd.offline-demo.policy.v1+json    -> sha256:POLICY
 +-- application/vnd.offline-demo.model.v1         -> sha256:MODEL
++-- application/vnd.dev.sigstore.bundle.v0.3+json  -> sha256:SIGNATURE
 ...
 BLOCKED as expected: external-IPv4
 BLOCKED as expected: external-IPv6
 BLOCKED as expected: Docker-Hub-DNS
 BLOCKED as expected: embedded-DNS-proxy
 ...
-PASS: image + 3 referrers, identical digests, descriptors, trees and payload bytes.
+PASS: image + 4 referrers, identical digests, descriptors, trees and payload bytes.
+PASS: Cosign verified the isolated image; wrong-key verification failed.
 PASS: external egress blocked; zero rejected workload packets.
-Total runtime: 18s
+Total runtime: 25s
 ```
 
 Each run is retained under `.state/run-<UTC timestamp>-<pid>/`; `.state/latest`
@@ -225,8 +239,12 @@ points to the newest. Useful evidence:
 - `subject.txt`: selected image digest, tested as
   `sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395`.
 - `connected/` and `airgapped/`: raw endpoint JSON, raw trees, canonical trees,
-  sorted descriptors, digest lists and all four fetched manifests.
+  sorted descriptors, digest lists and all five fetched manifests.
 - `pulled/`: artifacts downloaded from the isolated registry.
+- `trust/*.pub`: demo signing public key and wrong public key for the negative
+  test. No private key is written to the host.
+- `connected-signature.json`, `airgapped-signature.json`: identical verified
+  image claims; `wrong-key.stderr` records the cryptographic verification error.
 - `isolation-probes.txt`, `firewall-probes.txt`, `firewall-workload.txt`,
   `offline-network.json`, `offline-container.json`, `offline-routes*.txt`.
 - `tool-versions.txt`, `docker-version.txt`, `tool-images.json`, `result.txt`.
@@ -251,6 +269,43 @@ Manual operations after completion are outside the recorded workload-counter
 window. Do not restart the isolated registry for inspection: restarting its
 namespace discards the installed firewall. Rerun the orchestrator instead.
 
+## Offline Cosign verification and trust boundary
+
+[verify-signature.sh](scripts/verify-signature.sh) runs:
+
+```bash
+cosign verify --key /work/trust/cosign.pub --offline \
+  --new-bundle-format=true --insecure-ignore-tlog \
+  --trusted-root /demo/trusted-root.json --allow-http-registry \
+  localhost:5000/demo/alpine@sha256:IMAGE
+```
+
+Cosign retrieves the bundle referrer from the isolated registry, not a sidecar
+signature file or host cache. Each verification container starts with an empty
+`/tmp` home; the connected Cosign cache is not carried offline. Successful
+verification must report exactly the expected image digest and signing predicate.
+The script compares connected/offline claims and requires a **signature
+verification error** for the wrong key, not just any nonzero exit status.
+
+The local public key is the trust anchor. [trusted-root.json](config/trusted-root.json)
+is explicitly empty: it configures **no** trusted Sigstore CAs, transparency logs
+or timestamp authorities, avoiding network-backed TUF bootstrap. It does not
+replace the `--key` check or cause arbitrary signatures to be accepted.
+`--insecure-ignore-tlog` intentionally waives public transparency verification:
+no Rekor upload, inclusion proof, signing time, Fulcio identity or keyless
+verification is demonstrated. Cosign warns about this waiver. Cosign 3.0.2 also
+prints “Existence of the claims in the transparency log was verified offline”
+when `--offline` is set, **even with the log check disabled**; that status line
+is not evidence of log inclusion in this demo.
+
+For a real transfer, provision and authenticate the public key independently
+of the untrusted bundle. Here it is freshly generated and explicitly trusted
+within one rehearsal; replacing both key and signature would defeat that trust.
+Only the **image digest** is signed. The SBOM, policy and model are not individually
+signed or cryptographically bound to the image by this signature: new referrers
+can be added without changing the image digest. Their preservation is checked
+by the graph comparison, not an admission authenticity policy.
+
 ## Tested with
 
 Test date: **2026-10-17**, Linux amd64, kernel **7.0.0-38-generic**.
@@ -264,6 +319,7 @@ Image tags **and immutable digests** are recorded in
 | zot | 2.1.15 |
 | ORAS | 1.3.0 |
 | Syft | 1.46.0 |
+| Cosign | 3.0.2 |
 | Docker engine / CLI | 29.9.1 |
 | Host Bash / tools Bash | 5.2.21 / 5.3.9 |
 | Tools curl / jq | 8.22.0 / 1.8.2 |
@@ -271,16 +327,21 @@ Image tags **and immutable digests** are recorded in
 | Tools GNU coreutils | 9.11 |
 | ShellCheck | 0.9.0 |
 
-Verified end-to-end with two-second presenter sleeps: the 2026-10-17 rechecks
-took **18 seconds** and **78 seconds** with tooling already downloaded/built;
-**78 seconds** is the final post-fix run. The layout occupied about **3.9 MiB**.
+The final Cosign-enabled end-to-end run on 2026-10-17 took **25 seconds**,
+including two-second presenter sleeps, with tools cached. The first signed run
+took **37 seconds**, including a cached-base toolbox rebuild.
+The layout occupied about **3.9 MiB**.
 Allow for variation in connected upstream access and Docker operations.
 Initial tool-image pulls/builds are additional network-dependent preparation
 costs; no cold-download runtime is claimed. An exact runtime for each completed
 run is written to `result.txt`.
 
 Validation also rejected a deleted policy referrer, a corrupted layout index
-and an injected blocked packet in the workload-counter check. The toolbox
+and an injected blocked packet in the workload-counter check. The Cosign run
+also checks wrong-key rejection. A further test deleted the signature referrer:
+verification failed with the correct key until the bundle was reimported, proving
+the verifier depends on registry content rather than a cached signature.
+No private keys were found in the persisted run directory. The toolbox
 rebuilt successfully with `docker build --no-cache`. ShellCheck and Bash syntax
 checks passed. Repeatability, lock contention, unowned-resource protection and
 cleanup (including state purge) are tested; no Kubernetes cluster is required.
@@ -324,7 +385,7 @@ cleanup (including state purge) are tested; no Kubernetes cluster is required.
 - **Referrers endpoint 404, empty list, or wrong artifact count:** check zot
   version/config and the subject digest. Do not drop `--recursive` or use
   ordinary tag mirroring. Snapshot validation requires exactly the three
-  requested artifact types.
+  data artifact types plus the Cosign bundle type.
 - **Firewall workload counter nonzero:** investigate hidden network traffic,
   not just command exit status. Do not reset counters during the workload.
   The final assertion intentionally treats blocked external attempts as bugs.
@@ -333,12 +394,15 @@ cleanup (including state purge) are tested; no Kubernetes cluster is required.
 - **Failure diagnostics:** `docker logs offline-oras-referrers-airgapped`
   (or `offline-oras-referrers-connected` during CONNECTED) and the current
   evidence directory. No host ports need freeing.
-- HTTP without auth/TLS is limited to these disposable namespaces. This is
-  transport/integrity preservation, **not publisher authenticity**: checksums
+- HTTP without auth/TLS is limited to these disposable namespaces. Checksums
   detect damage against the inventory, not malicious replacement of both.
-  No real secrets, keys, certificates or signing material are generated.
-- Cosign signatures and offline signature verification are **not implemented
-  or tested**. The implemented stretch goal is the raw referrers API inspection.
+  Cosign adds image authenticity relative to the demo public key, not an
+  independently provisioned publisher identity. Ephemeral private signing keys
+  exist only in tmpfs, use an empty password for unattended demonstration, and
+  must never be reused for production. No keys or certificates are committed.
+- Both stretch goals are implemented: raw referrers API inspection and key-based
+  Cosign verification. Keyless signatures and transparency verification remain
+  outside this demo's trust contract.
 
 ## Cleanup
 
@@ -364,15 +428,17 @@ Nested referrers, multiple platforms, large-model chunking, and OCI artifacts
 consumed directly by Kubernetes are useful follow-on experiments.
 
 KitOps ModelKits illustrate packaging model-related data in registries, but a
-random blob with a custom type is not a conformant ModelKit. Likewise, a signature
-referrer alone is not an offline verification solution: trust roots, transparency
-proofs/bundles and verification policy must travel too. That is the natural next
-extension to the talk's future-work story, not a claim made by this demo.
+random blob with a custom type is not a conformant ModelKit. This demo now carries
+a signature bundle and verifies it against a local key. The next extension is
+independently provisioned trust, transparency proofs, key rotation/revocation and
+a policy binding every required artifact to the deployment. A signature referrer
+alone does not establish those properties.
 
 References: [OCI Distribution referrers specification](https://github.com/opencontainers/distribution-spec/blob/v1.1.1/spec.md#listing-referrers),
 [OCI image manifest](https://github.com/opencontainers/image-spec/blob/v1.1.1/manifest.md),
 [ORAS copy](https://oras.land/docs/commands/oras_cp/),
 [zot](https://zotregistry.dev/),
 [Syft](https://github.com/anchore/syft),
+[Cosign](https://github.com/sigstore/cosign),
 [KitOps](https://kitops.org/),
 [official Alpine image metadata](https://github.com/docker-library/official-images/blob/master/library/alpine).

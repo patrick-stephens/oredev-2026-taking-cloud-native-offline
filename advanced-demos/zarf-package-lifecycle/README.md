@@ -4,7 +4,7 @@
 |----------------|----------|------------------|--------|
 | 3–4 | podinfo | zarf, k3d | 🚧 WIP |
 
-One-file packages (images + charts + git) with SBOM, deployed disconnected
+Signed one-file packages (images + charts + git) with SBOM, verified and deployed disconnected
 
 [Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
 
@@ -26,7 +26,8 @@ CONNECTED (host + fresh k3d infrastructure)
   podinfo Helm repo -- podinfo chart:6.15.0
   public Git --------- podinfo@a9b846405af7697629de8a1da335aaf639a09f34
             |
-  zarf package create zarf-config.yaml  (automatic SBOM generation)
+  encrypted Cosign keypair (private key/password stay on build host)
+  zarf package create --signing-key ...  (automatic SBOM generation)
             |
   zarf-package-podinfo-offline-amd64-6.15.0.tar.zst
             |
@@ -35,10 +36,12 @@ AIR-GAPPED (all CLI operations inside the k3d node)
   mangle OUTPUT + FORWARD: IPv4/IPv6 external traffic DROP
   allow only local node, loopback, pod/service and IPv6 link-local traffic
             |
+  independently enrolled public key -> package verify (before init)
+            |
   local init archive -> injector -> seed registry -> permanent registry
                                             + mutating agent + local Gitea
             |
-  package deploy -> images pushed to local registry, Git pushed to local Gitea
+  package deploy --verify=always --key ... -> images/Git pushed locally
                  -> Helm chart installed, admitted pod references rewritten
             |
   podinfo Running + HTTP response + package list + SBOM extraction
@@ -56,6 +59,9 @@ Gitea inside this cluster**, using the public source cloned during CONNECTED.
   k3d containers. At least 4 CPUs, 8 GiB available RAM and **8 GiB free disk**.
 - Bash 4+, curl, jq, GNU coreutils (timeout, sha256sum, cmp), awk, grep and sed.
   Zarf supplies Helm; k3s supplies kubectl. No host Helm/kubectl is required.
+- Cosign runs from the pinned container image `ghcr.io/sigstore/cosign/cosign:v2.4.3`
+  to generate/validate the encrypted keypair; no host Cosign is required.
+  The optional signature regression script additionally needs GNU tar and zstd.
 - Initial GitHub/GHCR/Docker Hub/chart-repository access and adequate anonymous
   registry pull quota. No custom internet proxy on the node.
 - One copy per engine: `zarf-lifecycle` / `k3d-zarf-lifecycle-server-0` are
@@ -83,7 +89,7 @@ The two phases can also be run separately:
 
 ```bash
 ./scripts/connected.sh
-./scripts/air-gapped.sh
+./scripts/air-gapped.sh --trusted-key "$PWD/keys/cosign.pub"
 ./scripts/cleanup.sh
 ```
 
@@ -98,10 +104,16 @@ The package definition is [zarf-config.yaml](zarf-config.yaml). v0.88.0 defaults
 to `zarf.yaml` when given a directory, so pass our requested filename explicitly:
 
 ```bash
-.tools/zarf package create zarf-config.yaml --confirm \
+ZARF_PACKAGE_CREATE_SIGNING_KEY_PASSWORD="$(cat keys/password)" \
+  .tools/zarf package create zarf-config.yaml --confirm \
+  --signing-key keys/cosign.key --tlog-upload=false \
   --output artifacts --cache .state/cache
+.tools/zarf package verify \
+  artifacts/zarf-package-podinfo-offline-amd64-6.15.0.tar.zst \
+  --key keys/cosign.pub
 .tools/zarf package inspect sbom \
   artifacts/zarf-package-podinfo-offline-amd64-6.15.0.tar.zst \
+  --verify=always --key keys/cosign.pub \
   --output artifacts/sbom-connected
 ```
 
@@ -129,6 +141,50 @@ for that key and healthy addons before isolation. Cached node/tool images are
 checked for `linux/amd64`; a wrong-platform local tag is pulled correctly while
 still CONNECTED.
 
+### Signing and independent trust
+
+The connected script generates an encrypted **Cosign-compatible keypair** in
+ignored `keys/`, with a random password and private directory permissions.
+Subsequent runs validate and reuse the same identity. An incomplete or mismatched
+keypair fails rather than silently rotating trust. Cosign key operations run
+with `--network none`. Zarf signs using `--signing-key`; its password is passed
+through `ZARF_PACKAGE_CREATE_SIGNING_KEY_PASSWORD`, not a command-line argument.
+Do not enable shell tracing or publish private logs.
+
+Zarf v0.88.0 embeds `zarf.bundle.sig`, signing `zarf.yaml`. Its authenticated
+checksum chain protects the components, images and SBOM; offline verification
+checks both the signature and package integrity. This is package signing,
+not a separate signature on each upstream image.
+
+Enroll `keys/cosign.pub` through an **independent authenticated channel**, or
+compare its SHA-256 fingerprint printed by CONNECTED. A public key delivered
+only inside an untrusted package would not establish trust. The single-host
+wrapper explicitly passes the original build-side public key to model that
+enrollment; a real target uses its own pre-enrolled copy:
+
+```bash
+./scripts/air-gapped.sh --trusted-key /trusted/publisher-cosign.pub
+```
+
+The node mounts only `.tools/` (read-only), `config/` (read-only) and `artifacts/`,
+**not the whole demo directory or host state**. It receives only the chosen
+public key at `/work/trust/cosign.pub`; neither private signing key nor password
+is mounted or packaged. A cluster created by an older whole-directory mount
+must be cleaned up and recreated.
+
+Before init, `package verify --key ...` rejects invalid packages. Deployment
+and SBOM extraction additionally specify **`--verify=always --key ...`**,
+because Zarf's default `if-possible` policy is not a fail-closed requirement.
+There is no retry without verification on failure. No Fulcio, OIDC, Rekor or
+timestamp service is required: signing disables transparency-log upload and
+key verification uses Zarf's air-gap default of ignoring tlog verification.
+This proves publisher-key authenticity and integrity, not trusted signing time,
+revocation, freshness, replay prevention or upstream provenance.
+
+**Init is a separate trust boundary:** the release init archive is still
+checksum-verified, not authenticated with an enrolled upstream publisher key.
+Our application key does not authenticate it, the Zarf binary or node image.
+
 ### AIR-GAPPED: initialize from local bytes, then deploy
 
 The isolation script runs **inside the node**, never on the host. It uses
@@ -146,6 +202,10 @@ Counters are then reset so deliberate probes are not counted as unexpected
 deployment dependencies. Init and deploy run inside that **same namespace**:
 
 ```bash
+docker exec k3d-zarf-lifecycle-server-0 /work/.tools/zarf package verify \
+  /work/artifacts/zarf-package-podinfo-offline-amd64-6.15.0.tar.zst \
+  --key /work/trust/cosign.pub
+
 docker exec -e KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
   k3d-zarf-lifecycle-server-0 /work/.tools/zarf init \
   /work/artifacts/zarf-init-amd64-v0.88.0.tar.zst --confirm \
@@ -154,7 +214,8 @@ docker exec -e KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
 
 docker exec -e KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
   k3d-zarf-lifecycle-server-0 /work/.tools/zarf package deploy \
-  /work/artifacts/zarf-package-podinfo-offline-amd64-6.15.0.tar.zst --confirm
+  /work/artifacts/zarf-package-podinfo-offline-amd64-6.15.0.tar.zst --confirm \
+  --verify=always --key /work/trust/cosign.pub
 ```
 
 The injector in this release splits registry payloads into ConfigMaps, mounts
@@ -204,9 +265,11 @@ Compare the basic demos' explicit `--set image.registry=...` approach.
 === PHASE 1: CONNECTED - stage tools, init package and workload package ===
 ... generating SBOM
 ... writing package to disk
+SIGNED: package verified with the build-side public key. Enroll this key independently:
 CONNECTED COMPLETE: both application and init archives are staged locally.
 === PHASE 2: AIR-GAPPED - block and prove node/pod egress ===
 PROVED: external HTTP blocked; egress firewall covers node OUTPUT and pod FORWARD.
+VERIFIED: package signature and integrity using the independently trusted public key, offline.
 === PHASE 3: AIR-GAPPED - Zarf injector bootstraps registry, agent and Git ===
 INITIALIZED: registry, mutating agent and local Gitea are running.
 === PHASE 4: AIR-GAPPED - deploy the complete package ===
@@ -229,6 +292,24 @@ Evidence remains in ignored `artifacts/`:
 `package-list.txt`, `sbom-connected/`, `sbom-offline/`, `egress-before.txt`,
 `egress-after.txt` and `egress-deliberate-pod-probe.txt`.
 
+### Signature rejection regression tests
+
+After the full orchestrator, while its isolated cluster is still running:
+
+```bash
+bash ./scripts/test-signing.sh --trusted-key "$PWD/keys/cosign.pub"
+```
+
+The tests first verify the original signed package, then try both pre-init
+verification and deployment with
+an unrelated valid public key, a package stripped of its signature, an altered
+signed manifest, and an altered component payload. Each must fail for the
+expected verification/integrity reason, leave the deployed package Secret's
+resource version unchanged, and make zero forbidden IPv4/IPv6 requests.
+Temporary test archives/keys are removed; the original package is untouched.
+Private failure logs stay in `.state/signing-*.log`, and firewall evidence is
+saved as `artifacts/signing-test-egress.txt`.
+
 ## Tested with
 
 Retest date: **2026-10-17**, native Linux amd64:
@@ -243,8 +324,10 @@ Retest date: **2026-10-17**, native Linux amd64:
 | Bundled Git commit | a9b846405af7697629de8a1da335aaf639a09f34 |
 | StorageClass helper | rancher/mirrored-library-busybox:1.37.0 |
 | Pod sandbox | rancher/mirrored-pause:3.6 |
+| Key generation / validation | ghcr.io/sigstore/cosign/cosign:v2.4.3 |
 
-**Fresh final complete run: 146 seconds; idempotent repeat: 24 seconds**, with CLI/init/node artifacts pre-staged,
+**Signed fresh complete run in a real terminal: 168 seconds; signed idempotent
+repeat: 26 seconds**, with CLI/init/node artifacts pre-staged,
 including connected package creation, cluster bootstrap, offline init and deploy.
 Initial CLI/init downloads add connection-dependent time; the init archive is
 about 392 MiB. Timings are measurements, not guarantees.
@@ -254,6 +337,11 @@ key (23 seconds for the full repeat), replacement of an ARM64 node-image tag
 with the required amd64 image while CONNECTED, and repeated cleanup. All
 successful lifecycle runs recorded zero forbidden IPv4/IPv6 egress attempts;
 the explicit node and pod internet probes failed as required.
+The signed-package retest additionally rejected wrong-key, unsigned,
+manifest-tampered and component-tampered packages at both pre-init verification
+and mandatory deployment verification. No deployed-package state changed and
+no forbidden egress occurred during these tests. Private signing material was
+absent from the archive and target mounts; Bash/ShellCheck validation passed.
 
 ## Troubleshooting and known limitations
 
@@ -284,10 +372,12 @@ the explicit node and pod internet probes failed as required.
   dependencies until the pre-isolation node restart closed those sockets.
 - **Embedded `zarf tools kubectl` panic:** v0.88.0 can conflict on shorthand
   flags. This demo uses k3s' `/bin/kubectl` directly.
-- **Unsigned-package warning:** base demo does not implement the optional
-  signing stretch goal. The init archive is release-checksummed, but its
-  keyless signature is not authenticated here. The application package is
-  unsigned. Checksums/SBOMs do not replace publisher authentication.
+- **Signature/key failure:** check the independently enrolled public key and
+  re-transfer the package; never remove `--verify=always`. Restoring a missing
+  private key is preferable to unintentionally rotating the publisher identity.
+- **Init signature warning:** the application package is signed and mandatory
+  verification is enabled. The separate release init archive is checksummed,
+  but its upstream signature is not authenticated here.
 - Secrets/certificates, caches and logs are generated only in ignored paths
   or the local cluster. Init output may contain generated credentials, so
   `.state/` is private; do not commit or publish it.
@@ -307,6 +397,9 @@ the explicit node and pod internet probes failed as required.
 Only the recorded demo node identity is accepted. Cleanup deletes the cluster,
 its registry/Gitea volumes and the firewall's network namespace. It preserves
 local CLI binaries, package archives and SBOM evidence for the next run.
+The ignored signing identity is retained too; deleting only `keys/cosign.key`,
+`keys/cosign.pub` and `keys/password` after cleanup generates a new identity
+on the next build and requires deliberate public-key re-enrollment.
 It never touches host firewall rules or your default kubeconfig. No keys,
 certificates or secrets should be added to version control.
 
@@ -328,7 +421,7 @@ blocked node, not an online host. GitHub and public registries are not contacted
 | Image routing | Chart-specific registry/digest values | Inventory + admitted-pod mutation |
 | Git | Not included | Offline Git source delivered to local Gitea |
 | SBOM | Not generated | Built-in Syft inventory in package |
-| Signing | Explicit Cosign verify-before-import | Supported by Zarf; optional, not enabled here |
+| Signing | Explicit Cosign verify-before-import | Signed package; mandatory key verification before deploy |
 | Operational cost | Small, easy to audit | More services, storage and admission infrastructure |
 
 ## Future tooling
@@ -336,7 +429,7 @@ blocked node, not an online host. GitHub and public registries are not contacted
 Expect increasingly declarative package composition and OCI distribution,
 portable SBOM/provenance, policy-gated promotion and offline trust-root
 management. Zarf already supports Cosign-compatible signing and offline
-verification; signing packages is the natural next exercise. Keyless workflows
+verification; managed signing keys, rotation and admission policy are next steps. Keyless workflows
 still need their verification material, inclusion proof and trusted-time policy
 carried across the gap. The ecosystem can automate transport and reference
 mutation, but not remove the need to inventory bootstrap dependencies or plan

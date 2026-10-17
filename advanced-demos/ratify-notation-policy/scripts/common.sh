@@ -6,8 +6,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../config/versions.env
 source "$ROOT/config/versions.env"
-STATE="$ROOT/.state"
-BUNDLE="$ROOT/bundle"
+PROFILE="${DEMO_PROFILE:-notation}"
+case "$PROFILE" in notation|cosign|sbom) ;; *) echo "ERROR: Unknown DEMO_PROFILE: $PROFILE" >&2; exit 1 ;; esac
+STATE="$ROOT/.state/$PROFILE"
+BUNDLE="$ROOT/bundle/$PROFILE"
 CLUSTER=offline-ratify
 NODE="$CLUSTER-control-plane"
 REGISTRY=offline-ratify-zot
@@ -23,6 +25,12 @@ export NO_PROXY='*' no_proxy='*'
 fail() { echo "ERROR: $*" >&2; exit 1; }
 k() { docker exec -i "$NODE" kubectl --kubeconfig=/etc/kubernetes/admin.conf "$@"; }
 notation() { "$STATE/bin/notation" "$@"; }
+cosign() { "$STATE/bin/cosign" "$@"; }
+oras() {
+  local command=$1
+  shift
+  "$STATE/bin/oras" "$command" --registry-config "$STATE/docker/config.json" "$@"
+}
 phase() {
   if [[ -t 1 && -n ${TERM:-} ]]; then clear; fi
   echo "=== PHASE $* ==="
@@ -43,6 +51,19 @@ pod() {
   k -n offline-demo run "$name" --image="$REPOSITORY:$tag" \
     --image-pull-policy=Always --restart=Never \
     --overrides='{"spec":{"imagePullSecrets":[{"name":"registry-credentials"}]}}'
+}
+expect_denied() {
+  local name=$1 tag=$2
+  local rc=0
+  pod "$name" "$tag" >"$STATE/evidence/$tag-denial.txt" 2>&1 || rc=$?
+  cat "$STATE/evidence/$tag-denial.txt"
+  (( rc != 0 )) || fail "$tag was unexpectedly admitted"
+  grep -F 'admission webhook "validation.gatekeeper.sh" denied' "$STATE/evidence/$tag-denial.txt" >/dev/null \
+    || fail "$tag failed for a reason other than validating admission"
+  grep -F 'Offline signature required:' "$STATE/evidence/$tag-denial.txt" >/dev/null \
+    || fail "$tag did not fail evidence verification"
+  [[ $(k -n offline-demo get pods "$name" --ignore-not-found -o name) == "" ]] \
+    || fail "Rejected Pod exists: $name"
 }
 expect_blocked() {
   local label=$1

@@ -5,6 +5,6 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 started=$SECONDS
 bash "$DEMO_DIR/scripts/connected.sh"
-bash "$DEMO_DIR/scripts/air-gapped.sh"
+bash "$DEMO_DIR/scripts/air-gapped.sh" --trusted-key "$KEYS/cosign.pub"
 printf '\nTOTAL RUNTIME: %ss; cluster remains egress-blocked for inspection.\n' "$((SECONDS-started))"
 printf 'Cleanup: ./scripts/cleanup.sh\n'

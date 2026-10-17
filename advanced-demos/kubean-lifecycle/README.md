@@ -209,9 +209,10 @@ tar -xzf artifacts/kubean-lifecycle-bundles.tar.gz -C artifacts
    ```bash
    for version in v0.34.2 v0.39.2; do
      mkdir -p ".work/$version"/{files,images,os-pkgs}
-     tar -xzf "artifacts/kubean/$version/files-amd64-$version.tar.gz" -C ".work/$version/files"
-     tar -xzf "artifacts/kubean/$version/images-amd64-$version.tar.gz" -C ".work/$version/images"
-     tar -xzf "artifacts/kubean/$version/os-pkgs-ubuntu2204-$version.tar.gz" -C ".work/$version/os-pkgs"
+     tar --strip-components=1 -xzf "artifacts/kubean/$version/files-amd64-$version.tar.gz" -C ".work/$version/files"
+     tar --strip-components=1 -xzf "artifacts/kubean/$version/images-amd64-$version.tar.gz" -C ".work/$version/images"
+     tar --strip-components=1 -xzf "artifacts/kubean/$version/os-pkgs-ubuntu2204-$version.tar.gz" -C ".work/$version/os-pkgs"
+     (cd ".work/$version" && sha256sum --check os-pkgs/os-pkgs.sha256sum.txt)
 
      mkdir -p ".work/$version/files/payload" ".work/$version/os-pkgs/payload"
      tar -xzf ".work/$version/files/offline-files.tar.gz" -C ".work/$version/files/payload"
