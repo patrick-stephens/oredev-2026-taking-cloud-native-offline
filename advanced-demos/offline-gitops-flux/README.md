@@ -1,8 +1,8 @@
-# Offline GitOps with Flux, Gitea and Podinfo
+# Offline GitOps with Flux or Argo CD, Gitea and Podinfo
 
 | Spectrum level | Demo app | Headline tooling |
 |----------------|----------|------------------|
-| 3 | podinfo | flux, gitea, git bundle |
+| 3 | podinfo | flux / Argo CD, gitea, git bundle |
 
 Full GitOps loop (push → reconcile → deploy) inside the boundary
 
@@ -14,6 +14,11 @@ Gitea, the chart and workload image come from a local OCI registry, and a Git
 bundle carries an update into Gitea while the cluster has no Internet route.
 The app is [Podinfo](https://github.com/stefanprodan/podinfo), deployed using
 its Helm chart and a Flux `HelmRelease`.
+
+The optional **Argo CD variant** exercises the same boundary, private Gitea,
+local image registry, bundle import and observable update. It vendors the pinned
+Helm chart into Git and uses an automatically synced `Application` instead of
+a Flux HelmRelease. Neither variant requires a hosted Git provider offline.
 
 **Offline spectrum: level 3.** See the shared [offline spectrum](../../docs/offline-spectrum.md).
 Reconciliation and update delivery work inside the isolated boundary. This is
@@ -40,6 +45,12 @@ Flux CLI, Helm, kind, kubectl             +------------------------------+
 offline.bundle: baseline app manifests -> Gitea -> Flux bootstrap
 update.bundle: connected-side follow-up commit -> local SSH import -> Flux
 ```
+
+For Argo CD, replace the Flux controllers with Argo CD's non-HA installation:
+Gitea supplies both the Helm chart and its values to repo-server; the application
+controller applies the rendered resources; containerd pulls Podinfo and all
+Argo CD components from the internal registry. The OCI chart is also staged,
+but Argo CD deliberately consumes the chart from Git, not that OCI artifact.
 
 The registry and Gitea use dynamically assigned IPs on the internal Docker
 network. The registry is briefly attached to Docker's default bridge during
@@ -70,6 +81,10 @@ Tested on **2026-10-17**, Linux amd64, Docker Engine and CLI **29.9.1**:
 | kustomize-controller | 1.5.1 |
 | helm-controller | 1.2.0 |
 | notification-controller | 1.5.0 |
+| Argo CD (optional variant) | 3.1.9 |
+| Helm bundled in Argo CD repo-server | 3.18.4 |
+| Dex (Argo CD installation) | 2.43.0 |
+| Redis (Argo CD installation) | 7.2.11-alpine |
 | kind | 0.27.0 |
 | Kubernetes node image | `kindest/node:v1.32.2` |
 | kubectl | 1.32.2 |
@@ -90,9 +105,11 @@ versions. Container images and the chart are pinned separately in
 ## Prerequisites
 
 - Linux amd64 host with Docker Engine and Docker CLI; at least 4 CPUs, 6 GiB
-  available RAM and 8 GiB free Docker storage.
+  available RAM and 8 GiB free Docker storage. Allow 8 GiB RAM and 12 GiB
+  storage for the larger Argo CD variant.
 - Outbound Internet during CONNECTED staging to GitHub releases, GHCR,
-  Docker Hub, and `stefanprodan.github.io`.
+  Docker Hub, and `stefanprodan.github.io`. The Argo CD variant also uses
+  `raw.githubusercontent.com` and `quay.io`.
 - Bash, Git, curl, `jq`, `ssh-keygen`, `ssh-keyscan`, `od`, `sha256sum`,
   `xargs`, and `clear` (interactive terminal only).
 - Ports `127.0.0.1:5001` and `127.0.0.1:16443` unused. Gitea uses its
@@ -119,6 +136,70 @@ an unattended rehearsal:
 ```bash
 DEMO_AUTO_ADVANCE=1 ./scripts/run-demo.sh
 ```
+
+### Argo CD variant
+
+```bash
+./scripts/run-demo.sh --argocd
+# Or unattended:
+DEMO_AUTO_ADVANCE=1 ./scripts/run-demo.sh --argocd
+```
+
+The same cleanup and object names are used: **each run recreates the demo**,
+so run the variants sequentially, not concurrently. No Argo CD CLI is needed.
+The existing pinned Flux CLI is still installed by the shared tool installer.
+The phase descriptions below describe the default Flux run; Argo CD differs
+as follows:
+
+1. **CONNECTED:** download the official
+   [v3.1.9 installation manifest](https://github.com/argoproj/argo-cd/blob/v3.1.9/manifests/install.yaml).
+   Extract and mirror its three unique image references, including images used
+   by init containers. Use official Redis `docker.io/library/redis:7.2.11-alpine`
+   rather than the manifest's public ECR mirror, which rate-limited the rehearsal.
+   Mirror Argo CD from Quay and Dex from GHCR. Extract Podinfo's chart into
+   `apps/podinfo` in the generated Git repository and add
+   `values-offline.yaml` with the local image address, one replica and baseline
+   message. Both the chart and values travel inside each Git bundle.
+2. **AIR-GAPPED:** rewrite every controller/init-container image to the local
+   registry and server-side apply the staged installation, not a remote URL.
+   Register the generated SSH key as a repository Secret and the scanned Gitea
+   host keys in `argocd-ssh-known-hosts-cm`. Create the
+   [Application](config/argocd/application.yaml) with automated sync, prune and
+   self-heal, rendering the chart with the bundled values. Wait for its exact
+   Git revision, successful sync operation, `Synced` and `Healthy`, then verify
+   one ready replica and the live baseline HTTP message.
+3. **AIR-GAPPED UPDATE:** import the second bundle using the same checksum,
+   fetch, cherry-pick and local SSH push path. A hard-refresh annotation
+   accelerates Git discovery; **the controller performs the automatic sync**,
+   not a host-side `helm upgrade` or `kubectl apply` of Podinfo. Check the
+   imported SHA, successful sync, two ready replicas and the updated live
+   message. Repeat the same external-egress negative/local-registry positive
+   controls before and after the update.
+
+Argo CD uses [Helm to render resources](https://argo-cd.readthedocs.io/en/release-3.1/user-guide/helm/),
+not to manage a Helm release. The chart has no external dependencies; no
+dependency download is needed offline. Repository credentials are generated
+under ignored `.state/` and stored in the disposable cluster, never committed.
+This is Argo CD's standard non-HA evaluation installation with broad cluster
+permissions, not a hardened production configuration.
+
+#### Flux versus Argo CD in this demo
+
+| Concern | Flux (default) | Argo CD (`--argocd`) |
+| --- | --- | --- |
+| Reconciliation entry point | GitRepository + Kustomization | Git-backed Application |
+| Chart transport | Local OCI registry via OCIRepository | Pinned chart vendored in the Git bundle |
+| Helm behavior | HelmRelease drives Helm install/upgrade and release state | Repo-server runs Helm templating; Argo CD owns sync/lifecycle |
+| Bootstrap | Flux CLI commits its own manifests to Gitea | Apply staged controller manifests and a local Application; no bootstrap Git commit |
+| Update | Bundle carries HelmRelease values | Bundle carries chart and Helm values |
+| Import history | Cherry-pick preserves Flux's bootstrap commit | Same importer works; no bootstrap commit to preserve |
+| Operator surface | Flux CLI and Kubernetes CRs | Application sync/health CRs; server/UI available but not needed |
+| Offline payload | Four controller images plus chart OCI artifact | Three unique images across seven controller workloads, plus chart files in Git |
+
+Vendoring is intentional: one checksummed bundle carries the chart and values
+without plain-HTTP OCI repository configuration. It enlarges Git history when
+charts change. Argo CD also supports native OCI Helm sources and multi-source
+Applications; this variant does **not** claim to exercise those features.
 
 ### Phase 1 — CONNECTED
 
@@ -217,7 +298,7 @@ podinfo-...   1/1       Running
 podinfo-...   1/1       Running
 desired=2 ready=2
 PASS: revision <commit>, 2 ready replicas, live message "Updated through offline bundle" and embedded logo.
-COMPLETE: Flux reconciled the Gitea update with external egress blocked.
+COMPLETE: flux reconciled the Gitea update with external egress blocked.
 Total runtime: <minutes>m <seconds>s
 ```
 
@@ -226,7 +307,40 @@ The initial evidence block shows `desired=1 ready=1`. If Flux reports
 explicit `flux reconcile` and rollout waits have not completed and the run
 does not claim success.
 
+For the Argo CD run, the evidence block instead includes:
+
+```text
+NAME      SYNC STATUS   HEALTH STATUS
+podinfo   Synced        Healthy
+desired=2 ready=2
+COMPLETE: argocd reconciled the Gitea update with external egress blocked.
+```
+
+Additional Application columns depend on kubectl's CRD printer. The script also
+checks `.status.sync.revision` and the successful operation's revision against
+the exact imported commit; a stale Healthy condition is not sufficient.
+
 ## Validation results
+
+The final Argo CD addition and default Flux regression both passed on
+**2026-10-17**, each recreating the cluster, Gitea and registry:
+
+| Full orchestrator run | Runtime | Result |
+| --- | --- | --- |
+| Argo CD 3.1.9, final rehearsal | **2m 39s** | Synced/Healthy at baseline and imported update SHA; live app 1 -> 2 ready replicas and updated message |
+| Flux 2.5.1, default regression | **1m 57s** | Git source/Kustomization/HelmRelease reconciled; same live app update |
+
+Both final runs used cached upstream Docker layers and tool binaries, but
+new registry volumes and new kind nodes. Argo CD's seven workloads, including
+all init containers, referenced the internal registry. Identical isolation
+checks passed before and after both updates. Negative Argo CD assertions
+rejected an incorrect Git SHA and an incorrect live message. The first Argo CD
+attempt failed honestly during CONNECTED on public ECR's Redis rate limit;
+the explicit Docker Hub source resolved it. The first successful Argo CD run
+took **4m 51s** before the final rehearsal. Runtime includes staging and waits,
+but not post-run cleanup; cold downloads and interactive pauses add time.
+
+Earlier Flux-only validation:
 
 On 2026-10-17, the full demo was rerun from recreated cluster, Gitea and registry
 volumes, including a fresh download of all four CLI tools. The final successful
@@ -274,6 +388,13 @@ cached images/tools are deliberately retained.
   `kubectl -n podinfo get ocirepository,helmrelease` and
   `kubectl -n podinfo describe helmrelease podinfo`. The chart tag must be
   `6.15.0`, and the OCI source must use the internal registry's current IP.
+- **Argo CD sync failure:** inspect
+  `kubectl -n argocd get application podinfo -o yaml` and
+  `kubectl -n argocd logs deployment/argocd-repo-server`. A comparison error
+  commonly means incorrect SSH host keys, missing credentials, or an incorrect
+  Git path. Confirm the bundled chart and `values-offline.yaml` exist at
+  `apps/podinfo`. For pull errors, inspect the failing pod's normal and init
+  image references; all must use the internal registry.
 - **Egress probe succeeds:** stop. The run is not a successful offline demo.
   Verify `offline-gitops-net` is marked `Internal: true` and inspect the
   IPv4 and IPv6 `OUTPUT`/`FORWARD` rules in the kind node with
@@ -291,6 +412,15 @@ export KUBECONFIG="$PWD/.state/kubeconfig"
 flux get sources git -A
 flux get kustomizations -A
 kubectl -n podinfo get helmrelease,ocirepository,pods
+kubectl get --raw /api/v1/namespaces/podinfo/services/http:podinfo:9898/proxy/
+```
+
+For Argo CD, replace the Flux-specific commands with:
+
+```bash
+kubectl -n argocd get application podinfo -o wide
+kubectl -n argocd get application podinfo -o jsonpath='{.status.sync.revision}{"\n"}'
+kubectl -n podinfo get deployment,pods
 kubectl get --raw /api/v1/namespaces/podinfo/services/http:podinfo:9898/proxy/
 ```
 
@@ -325,8 +455,8 @@ pinned binaries in `.tools/` are retained for faster reruns.
 ## Where network is still required
 
 Internet is required on the **host** during CONNECTED staging to fetch tools,
-the pinned Gitea/registry/kind/Podinfo/probe images, Flux controller images,
-and the Podinfo chart. During AIR-GAPPED phases the containers and Kubernetes
+the pinned Gitea/registry/kind/Podinfo/probe images, selected controller images,
+the Argo CD install manifest when selected, and the Podinfo chart. During AIR-GAPPED phases the containers and Kubernetes
 pods cannot egress to external destinations, checked with namespace-level and
 pod-level HTTPS probes. The host remains the local operator/transfer bridge and uses SSH to import the
 bundle into Gitea; that local access is required and is not Internet access.
@@ -342,6 +472,7 @@ and Podinfo images by digest, and use a registry with TLS and authentication.
 For an operational deployment, compare this Git-bundle handoff with
 content-addressed OCI Git artifacts and a controlled transfer gateway; keep
 the Git revision and artifact digest linked in the release record.
-An optional ArgoCD variant would compare the same bundle-import boundary with
-Application reconciliation and local Helm chart sourcing; it is not implemented
-in this Flux demo.
+The included Argo CD variant compares Application reconciliation with the same
+bundle-import boundary. A further extension could use a local OCI Helm source
+plus Git-hosted values for Argo CD, comparing artifact promotion and trust
+without vendoring chart files into Git.

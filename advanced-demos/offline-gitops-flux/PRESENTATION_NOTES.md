@@ -1,4 +1,4 @@
-# Presentation notes: offline GitOps with Flux
+# Presentation notes: offline GitOps with Flux or Argo CD
 
 ## Story
 
@@ -8,6 +8,10 @@ image/chart source. This demo replaces both with local services, then makes
 the audience watch the part that is usually skipped: a change is bundled on
 the connected side, carried across the boundary, imported into local Gitea,
 and reconciled by Flux without restoring Internet access.
+
+Use `./scripts/run-demo.sh --argocd` to tell the same story with Argo CD.
+The default remains Flux. Each run recreates the same local environment, so
+show them sequentially rather than trying to compare two running clusters.
 
 ## Key beats
 
@@ -39,6 +43,29 @@ and reconciled by Flux without restoring Internet access.
    Helm's observed generation, not just a possibly stale Ready condition.
    Podinfo's logo is embedded rather than fetched from GitHub.
 
+## Argo CD presentation beats
+
+- **Same boundary, different reconciliation model.** All controller and init
+  images come from the local registry. Three unique images supply six
+  Deployments and the application-controller StatefulSet. No Argo CLI is needed.
+- **Show the transfer unit.** The Git bundle contains Podinfo's pinned Helm
+  chart and `values-offline.yaml`. The local registry supplies the workload
+  image. Contrast this with Flux's OCI chart source: bundling the chart reduces
+  repository configuration but grows Git history.
+- **Watch Application health and revision.** Baseline and update both show
+  `Synced` and `Healthy`. Point to the exact imported commit, then the one-to-two
+  replica change and live message. A healthy old revision is not success.
+- **Explain the refresh.** The script annotates the Application for a hard
+  refresh to keep the rehearsal short. Automated sync still performs the
+  deployment; the host never runs `helm upgrade` against Podinfo.
+- **Keep lifecycle distinctions honest.** Flux's Helm controller creates a
+  Helm release. Argo CD templates the same chart, then manages resources and
+  their lifecycle itself. Do not use `helm list` as Argo CD evidence.
+- **Keep bootstrap distinctions honest.** Argo CD's Application and repository
+  credentials are installed locally and it makes no bootstrap Git commit.
+  The shared cherry-pick importer remains valid; it is essential for Flux's
+  divergent bootstrap history, not essential for Argo CD's baseline history.
+
 ## Likely questions
 
 - **Is the host really offline?** No. This is an isolated Docker/kind boundary
@@ -51,6 +78,14 @@ and reconciled by Flux without restoring Internet access.
 - **Why not just use a local Git server and stop there?** The meaningful
   claim is the complete chain: staged chart and image, offline Git import,
   Flux reconciliation, and a second disconnected delivery.
+- **Why not use an OCI chart source with Argo CD too?** It supports OCI Helm
+  sources and separate Git values. This variant deliberately vendors the chart
+  so a single bundle transfers both chart and values without insecure OCI
+  repository settings. It is a transport trade-off, not an Argo CD limitation.
+- **Can I use the Argo CD UI?** The standard server is installed, but the
+  scripted evidence uses Application CRs rather than login or UI automation.
+  The installation is disposable, non-HA and broadly privileged; it is not
+  production hardening guidance.
 - **Why is the registry HTTP?** The aim is a small reproducible local
   topology. Flux's `OCIRepository` explicitly allows insecure HTTP; a real
   platform should use TLS, authentication, scoped credentials and digest
@@ -73,7 +108,21 @@ and reconciled by Flux without restoring Internet access.
 
 ## Rehearsal result
 
-The 2026-10-17 full rerun completed in **1m 34s** with cached Docker image
-layers. Fresh CLI downloads were tested separately. Allow extra time for cold
-image downloads and narration; the orchestrator pauses between phases unless
-`DEMO_AUTO_ADVANCE=1`.
+The final 2026-10-17 rehearsals recreated each environment with cached upstream
+Docker image layers and tools:
+
+| Variant | Full runtime | Evidence |
+| --- | --- | --- |
+| Argo CD 3.1.9 | **2m 39s** | Synced/Healthy at exact baseline/update commits, 1 -> 2 ready replicas, updated live message |
+| Flux 2.5.1 regression | **1m 57s** | Ready source/Kustomization/HelmRelease, same live update |
+
+Isolation checks passed before and after both updates. An initial Argo CD
+staging run hit public ECR's Redis rate limit; the script now explicitly uses
+the same pinned official Redis version from Docker Hub. Argo CD's embedded
+Helm was verified as 3.18.4 (the host Helm remains 3.17.1). Incorrect Argo CD
+revision and live-message assertions were rejected.
+
+An earlier Flux-only run took 1m 34s; fresh CLI downloads were tested separately.
+Allow extra time for cold image downloads and narration; the orchestrator
+pauses between phases unless `DEMO_AUTO_ADVANCE=1`. Cleanup is not included
+in these runtimes.

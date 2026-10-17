@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+source "$(dirname -- "${BASH_SOURCE[0]}")/argocd.sh"
+
+engine=flux
+case "${1:-}" in
+    "") [[ "$#" == 0 ]] || die "Unexpected empty argument." ;;
+    --argocd) engine=argocd; shift ;;
+    --help|-h)
+        printf 'Usage: %s [--argocd]\nDefault: Flux; --argocd selects Argo CD. Both runs recreate this demo.\n' "$0"
+        exit 0
+        ;;
+    *) die "Unknown option: $1 (use --help)" ;;
+esac
+[[ "$#" == 0 ]] || die "Unexpected additional arguments (use --help)."
 
 started_at=$SECONDS
 report_failure() {
@@ -48,17 +61,21 @@ docker run --detach --name "$REGISTRY_CONTAINER" \
 wait_for_url "http://127.0.0.1:5001/v2/" "local registry"
 
 flux_images="$STATE_DIR/flux-images.txt"
-"$TOOLS_DIR/flux" install --export |
-    sed -nE 's/^[[:space:]]*image: (ghcr\.io\/fluxcd\/(source-controller|kustomize-controller|helm-controller|notification-controller):[^[:space:]]+).*$/\1/p' |
-    sort -u >"$flux_images"
-[[ "$(wc -l <"$flux_images")" -eq 4 ]] ||
-    die "Flux $FLUX_VERSION did not export exactly four required controller images."
-while IFS= read -r image; do
-    docker pull "$image"
-    local_image="127.0.0.1:5001/${image#ghcr.io/}"
-    docker tag "$image" "$local_image"
-    docker push "$local_image"
-done <"$flux_images"
+if [[ "$engine" == argocd ]]; then
+    stage_argocd
+else
+    "$TOOLS_DIR/flux" install --export |
+        sed -nE 's/^[[:space:]]*image: (ghcr\.io\/fluxcd\/(source-controller|kustomize-controller|helm-controller|notification-controller):[^[:space:]]+).*$/\1/p' |
+        sort -u >"$flux_images"
+    [[ "$(wc -l <"$flux_images")" -eq 4 ]] ||
+        die "Flux $FLUX_VERSION did not export exactly four required controller images."
+    while IFS= read -r image; do
+        docker pull "$image"
+        local_image="127.0.0.1:5001/${image#ghcr.io/}"
+        docker tag "$image" "$local_image"
+        docker push "$local_image"
+    done <"$flux_images"
+fi
 
 podinfo_registry_image="127.0.0.1:5001/podinfo:6.15.0"
 docker tag "$PODINFO_IMAGE" "$podinfo_registry_image"
@@ -82,7 +99,15 @@ docker network disconnect bridge "$REGISTRY_CONTAINER"
     die "The local registry did not remain connected to the internal Docker network."
 
 git -C "$STATE_DIR/connected" init --initial-branch=main >/dev/null
-cp -a "$DEMO_DIR/config/git-repo/." "$STATE_DIR/connected/"
+if [[ "$engine" == argocd ]]; then
+    mkdir -p "$STATE_DIR/connected/apps"
+    tar -xzf "$STATE_DIR/podinfo-${CHART_VERSION}.tgz" -C "$STATE_DIR/connected/apps"
+    cp "$DEMO_DIR/config/argocd/values-offline.yaml" "$STATE_DIR/connected/apps/podinfo/"
+    helm_release="$STATE_DIR/connected/apps/podinfo/values-offline.yaml"
+else
+    cp -a "$DEMO_DIR/config/git-repo/." "$STATE_DIR/connected/"
+    helm_release="$STATE_DIR/connected/clusters/demo/apps/podinfo/helm-release.yaml"
+fi
 find "$STATE_DIR/connected" -type f -name '*.yaml' -print0 |
     xargs -0 sed -i "s/__REGISTRY_IP__/$registry_ip/g"
 git -C "$STATE_DIR/connected" config user.name "Offline GitOps Demo"
@@ -91,7 +116,6 @@ git -C "$STATE_DIR/connected" add .
 git -C "$STATE_DIR/connected" commit -m "Add offline podinfo deployment" >/dev/null
 git -C "$STATE_DIR/connected" bundle create "$STATE_DIR/offline.bundle" --all >/dev/null
 
-helm_release="$STATE_DIR/connected/clusters/demo/apps/podinfo/helm-release.yaml"
 sed -i \
     -e 's/replicaCount: 1/replicaCount: 2/' \
     -e 's/Offline baseline from Git/Updated through offline bundle/' \
@@ -139,7 +163,7 @@ printf 'Cluster prepared; external-interface egress rules installed before AIR-G
 
 pause_for_presenter
 
-phase "2: AIR-GAPPED — internal Git, registry, cluster and Flux bootstrap"
+phase "2: AIR-GAPPED — internal Git, registry, cluster and $engine bootstrap"
 docker run --detach --name "$GITEA_CONTAINER" \
     --pull=never \
     --network "$NETWORK_NAME" --network-alias gitea \
@@ -196,27 +220,37 @@ git clone "$STATE_DIR/offline.bundle" "$STATE_DIR/initial-import"
 git -C "$STATE_DIR/initial-import" remote add gitea "$ssh_url"
 GIT_SSH_COMMAND="$git_ssh_command" git -C "$STATE_DIR/initial-import" push gitea main
 
-printf 'y\n' | "$TOOLS_DIR/flux" bootstrap git \
-    --url "$ssh_url" \
-    --branch main \
-    --private-key-file "$ssh_key" \
-    --path clusters/demo \
-    --registry "$registry_ip:5000/fluxcd" \
-    --components source-controller,kustomize-controller,helm-controller,notification-controller \
-    --timeout 5m
+if [[ "$engine" == argocd ]]; then
+    install_argocd "$registry_ip" "$ssh_url" "$ssh_key"
+    baseline_commit="$(git -C "$STATE_DIR/initial-import" rev-parse HEAD)"
+    reconcile_argocd "$baseline_commit"
+else
+    printf 'y\n' | "$TOOLS_DIR/flux" bootstrap git \
+        --url "$ssh_url" \
+        --branch main \
+        --private-key-file "$ssh_key" \
+        --path clusters/demo \
+        --registry "$registry_ip:5000/fluxcd" \
+        --components source-controller,kustomize-controller,helm-controller,notification-controller \
+        --timeout 5m
 
-"$TOOLS_DIR/kubectl" -n flux-system wait \
-    --for=condition=Ready pod --all --timeout=5m
-"$TOOLS_DIR/flux" reconcile source git flux-system --timeout=2m
-"$TOOLS_DIR/flux" reconcile kustomization flux-system --with-source --timeout=5m
-"$TOOLS_DIR/flux" reconcile helmrelease podinfo -n podinfo --with-source --timeout=5m
-baseline_commit="$(GIT_SSH_COMMAND="$git_ssh_command" git ls-remote "$ssh_url" refs/heads/main | cut -f1)"
-verify_state 1 "Offline baseline from Git" "$baseline_commit"
-verify_isolation "$registry_ip" "$external_iface" "$external_ip"
+    "$TOOLS_DIR/kubectl" -n flux-system wait \
+        --for=condition=Ready pod --all --timeout=5m
+    "$TOOLS_DIR/flux" reconcile source git flux-system --timeout=2m
+    "$TOOLS_DIR/flux" reconcile kustomization flux-system --with-source --timeout=5m
+    "$TOOLS_DIR/flux" reconcile helmrelease podinfo -n podinfo --with-source --timeout=5m
+    baseline_commit="$(GIT_SSH_COMMAND="$git_ssh_command" git ls-remote "$ssh_url" refs/heads/main | cut -f1)"
+fi
+verify_state 1 "Offline baseline from Git" "$baseline_commit" "$engine"
+verify_isolation "$registry_ip" "$external_iface" "$external_ip" "$engine"
 
 printf '\nInitial local evidence:\n'
-"$TOOLS_DIR/flux" get sources git -A
-"$TOOLS_DIR/flux" get kustomizations -A
+if [[ "$engine" == argocd ]]; then
+    "$TOOLS_DIR/kubectl" -n argocd get applications -o wide
+else
+    "$TOOLS_DIR/flux" get sources git -A
+    "$TOOLS_DIR/flux" get kustomizations -A
+fi
 "$TOOLS_DIR/kubectl" -n podinfo get pods -o wide
 "$TOOLS_DIR/kubectl" -n podinfo get deployment podinfo \
     -o jsonpath='desired={.spec.replicas} ready={.status.readyReplicas}{"\n"}'
@@ -236,18 +270,26 @@ git -C "$STATE_DIR/update-import" cherry-pick -x "$update_commit"
 GIT_SSH_COMMAND="$git_ssh_command" git -C "$STATE_DIR/update-import" push origin main
 imported_commit="$(git -C "$STATE_DIR/update-import" rev-parse HEAD)"
 
-"$TOOLS_DIR/flux" reconcile source git flux-system --timeout=2m
-"$TOOLS_DIR/flux" reconcile kustomization flux-system --with-source --timeout=5m
-"$TOOLS_DIR/flux" reconcile helmrelease podinfo -n podinfo --with-source --timeout=5m
-verify_state 2 "Updated through offline bundle" "$imported_commit"
-verify_isolation "$registry_ip" "$external_iface" "$external_ip"
+if [[ "$engine" == argocd ]]; then
+    reconcile_argocd "$imported_commit"
+else
+    "$TOOLS_DIR/flux" reconcile source git flux-system --timeout=2m
+    "$TOOLS_DIR/flux" reconcile kustomization flux-system --with-source --timeout=5m
+    "$TOOLS_DIR/flux" reconcile helmrelease podinfo -n podinfo --with-source --timeout=5m
+fi
+verify_state 2 "Updated through offline bundle" "$imported_commit" "$engine"
+verify_isolation "$registry_ip" "$external_iface" "$external_ip" "$engine"
 
 printf '\nUpdated local evidence:\n'
-"$TOOLS_DIR/flux" get sources git -A
-"$TOOLS_DIR/flux" get kustomizations -A
+if [[ "$engine" == argocd ]]; then
+    "$TOOLS_DIR/kubectl" -n argocd get applications -o wide
+else
+    "$TOOLS_DIR/flux" get sources git -A
+    "$TOOLS_DIR/flux" get kustomizations -A
+fi
 "$TOOLS_DIR/kubectl" -n podinfo get pods -o wide
 "$TOOLS_DIR/kubectl" -n podinfo get deployment podinfo \
     -o jsonpath='desired={.spec.replicas} ready={.status.readyReplicas}{"\n"}'
-printf '\nCOMPLETE: Flux reconciled the Gitea update with external egress blocked.\n'
+printf '\nCOMPLETE: %s reconciled the Gitea update with external egress blocked.\n' "$engine"
 printf 'Total runtime: %dm %02ds\n' "$(( (SECONDS - started_at) / 60 ))" "$(( (SECONDS - started_at) % 60 ))"
 printf 'Runtime remains available for inspection; run ./scripts/cleanup.sh when done.\n'

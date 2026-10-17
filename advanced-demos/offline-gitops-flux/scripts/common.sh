@@ -16,6 +16,7 @@ KIND_NODE_IMAGE="kindest/node:v1.32.2"
 PODINFO_IMAGE="ghcr.io/stefanprodan/podinfo:6.15.0"
 CURL_IMAGE="curlimages/curl:8.12.1"
 FLUX_VERSION="2.5.1"
+ARGOCD_VERSION="3.1.9"
 KIND_VERSION="0.27.0"
 KUBECTL_VERSION="1.32.2"
 HELM_VERSION="3.17.1"
@@ -70,22 +71,32 @@ network_container_ip() {
 
 verify_state() {
     local replicas=$1 message=$2 commit=$3
+    local engine=${4:-flux}
     local revision="main@sha1:$commit"
     local actual
-    actual="$(kubectl -n flux-system get gitrepository flux-system -o jsonpath='{.status.artifact.revision}')"
-    [[ "$actual" == "$revision" ]] || die "Git source revision is $actual, expected $revision"
-    actual="$(kubectl -n flux-system get kustomization flux-system -o jsonpath='{.status.lastAppliedRevision}')"
-    [[ "$actual" == "$revision" ]] || die "Applied revision is $actual, expected $revision"
+    if [[ "$engine" == argocd ]]; then
+        kubectl -n argocd get application podinfo -o json |
+            jq -e --arg commit "$commit" '
+                .status.sync.revision == $commit and .status.sync.status == "Synced" and
+                .status.health.status == "Healthy" and .status.operationState.phase == "Succeeded" and
+                .status.operationState.syncResult.revision == $commit
+            ' >/dev/null || die "Argo CD has not synced the expected Git commit."
+    else
+        actual="$(kubectl -n flux-system get gitrepository flux-system -o jsonpath='{.status.artifact.revision}')"
+        [[ "$actual" == "$revision" ]] || die "Git source revision is $actual, expected $revision"
+        actual="$(kubectl -n flux-system get kustomization flux-system -o jsonpath='{.status.lastAppliedRevision}')"
+        [[ "$actual" == "$revision" ]] || die "Applied revision is $actual, expected $revision"
 
-    kubectl -n podinfo get helmrelease podinfo -o json |
-        jq -e --argjson replicas "$replicas" --arg message "$message" '
-            .metadata.generation as $generation |
-            .spec.values.replicaCount == $replicas and
-            .spec.values.ui.message == $message and
-            .status.observedGeneration == $generation and
-            any(.status.conditions[]; .type == "Ready" and .status == "True" and
-                .observedGeneration == $generation)
-        ' >/dev/null || die "HelmRelease has not released the expected replicas/message at its current generation."
+        kubectl -n podinfo get helmrelease podinfo -o json |
+            jq -e --argjson replicas "$replicas" --arg message "$message" '
+                .metadata.generation as $generation |
+                .spec.values.replicaCount == $replicas and
+                .spec.values.ui.message == $message and
+                .status.observedGeneration == $generation and
+                any(.status.conditions[]; .type == "Ready" and .status == "True" and
+                    .observedGeneration == $generation)
+            ' >/dev/null || die "HelmRelease has not released the expected replicas/message at its current generation."
+    fi
     kubectl -n podinfo rollout status deployment/podinfo --timeout=3m
     kubectl -n podinfo get deployment podinfo -o json |
         jq -e --argjson replicas "$replicas" '
@@ -105,6 +116,7 @@ verify_state() {
 
 verify_isolation() {
     local registry_ip=$1 external_iface=$2 external_ip=$3
+    local engine=${4:-flux}
     local container network
     [[ "$(docker network inspect --format '{{.Internal}}' "$NETWORK_NAME")" == "true" ]] ||
         die "The service network is no longer internal."
@@ -119,11 +131,17 @@ verify_isolation() {
         docker exec "$CLUSTER_NODE" "$network" -C FORWARD -o "$external_iface" -j REJECT ||
             die "$network FORWARD egress block is missing on $external_iface."
     done
-    kubectl -n flux-system get deployments -o json |
-        jq -e --arg registry "$registry_ip:5000/fluxcd/" '
-            (.items | length) == 4 and
-            all(.items[].spec.template.spec.containers[]; .image | startswith($registry))
-        ' >/dev/null || die "Flux controllers are not all using the local registry."
+    local namespace=flux-system workloads=4
+    if [[ "$engine" == argocd ]]; then
+        namespace=argocd
+        workloads=7
+    fi
+    kubectl -n "$namespace" get deployment,statefulset -o json |
+        jq -e --arg registry "$registry_ip:5000/" --argjson workloads "$workloads" '
+            (.items | length) == $workloads and
+            all(.items[].spec.template.spec |
+                (.containers + (.initContainers // []))[]; .image | startswith($registry))
+        ' >/dev/null || die "$engine controllers are not all using the local registry."
 
     for container in "$CLUSTER_NODE" "$GITEA_CONTAINER" "$REGISTRY_CONTAINER"; do
         docker run --pull=never --rm --network "container:$container" "$CURL_IMAGE" \

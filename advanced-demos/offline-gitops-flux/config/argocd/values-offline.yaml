@@ -1,0 +1,8 @@
+replicaCount: 1
+image:
+  repository: __REGISTRY_IP__:5000/podinfo
+  tag: 6.15.0
+  pullPolicy: IfNotPresent
+ui:
+  message: "Offline baseline from Git"
+  logo: "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
