@@ -1,3 +1,4 @@
+---
 services:
   registry:
     image: registry:2.8.3

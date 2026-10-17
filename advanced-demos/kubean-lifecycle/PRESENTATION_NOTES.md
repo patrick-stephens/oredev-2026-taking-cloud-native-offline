@@ -8,9 +8,10 @@ before the first node is installed. Show the lifecycle boundary, not just a
 workload that happens to keep running after disconnecting a container.
 
 KVM VM boot, SSH provisioning, peer connectivity, and guest NAT isolation
-were executed successfully. The release-bundle assembly and Kubean
-install/upgrade were not run; keep them marked **# UNTESTED** until both
-lifecycle operations and both httpd checks pass.
+were executed successfully. Bundle preparation was attempted but stopped
+before a complete transfer archive was produced. Kubean install/upgrade were
+not run; keep them marked **# UNTESTED** until both lifecycle operations and
+both httpd checks pass.
 
 ## Key beats
 
@@ -22,8 +23,8 @@ lifecycle operations and both httpd checks pass.
    worker VM. Kubean reaches them over SSH and provisions OS packages before
    deploying Kubernetes.
 3. **Draw the boundary.** At the AIR-GAPPED banner, detach each VM's NAT NIC.
-   Demonstrate no guest default route and a failed TCP connection to
-   `1.1.1.1:443`. The static Nginx file service, registry, and
+   Demonstrate no IPv4/IPv6 guest default route and failed public IPv4/IPv6
+   TCP probes. The static Nginx file service, registry, and
    libvirt-isolated control plane remain reachable.
 4. **Install from the older localrelease.** Apply the v0.34.2
    LocalArtifactSet, Cluster, and ClusterOperation. Verify both nodes report

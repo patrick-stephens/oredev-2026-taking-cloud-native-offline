@@ -3,14 +3,15 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 
 started_at=$SECONDS
-port_forward_pid=""
-cleanup_port_forward() {
-    if [[ -n "$port_forward_pid" ]] && kill -0 "$port_forward_pid" 2>/dev/null; then
-        kill "$port_forward_pid"
-        wait "$port_forward_pid" 2>/dev/null || true
+report_failure() {
+    local exit_code=$?
+    if [[ "$exit_code" != 0 ]]; then
+        printf 'FAILED (exit %s) after %dm %02ds; state retained for inspection.\n' \
+            "$exit_code" "$(( (SECONDS - started_at) / 60 ))" "$(( (SECONDS - started_at) % 60 ))" >&2
     fi
 }
-trap cleanup_port_forward EXIT
+trap report_failure EXIT
+umask 077
 
 require_command docker
 require_command git
@@ -18,6 +19,7 @@ require_command curl
 require_command ssh-keygen
 require_command ssh-keyscan
 require_command jq
+require_command sha256sum
 
 docker info --format '{{.OSType}}/{{.Architecture}}' | grep -qx 'linux/x86_64' ||
     die "This pinned kind node and tool set requires a Linux amd64 Docker engine."
@@ -117,12 +119,21 @@ sed "s/__REGISTRY_IP__/$registry_ip/g" "$DEMO_DIR/config/kind.yaml" >"$STATE_DIR
 docker network connect "$NETWORK_NAME" "$CLUSTER_NODE"
 external_iface="$(docker exec "$CLUSTER_NODE" ip -4 route show default | awk 'NR == 1 {print $5}')"
 [[ -n "$external_iface" ]] || die "Could not identify the kind node's Internet-facing interface."
-docker exec "$CLUSTER_NODE" iptables -I OUTPUT 1 \
-    -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-docker exec "$CLUSTER_NODE" iptables -I OUTPUT 2 -o "$external_iface" -j REJECT
-docker exec "$CLUSTER_NODE" iptables -I FORWARD 1 \
-    -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-docker exec "$CLUSTER_NODE" iptables -I FORWARD 2 -o "$external_iface" -j REJECT
+external_ip="$(docker run --pull=never --rm --network "container:$CLUSTER_NODE" "$CURL_IMAGE" \
+    --noproxy '*' --ipv4 --fail --silent --show-error --max-time 15 \
+    --output /dev/null --write-out '%{remote_ip}' https://example.com/)"
+[[ "$external_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    die "The connected node's external HTTPS positive control failed."
+printf 'CONNECTED positive control: external HTTPS succeeded via %s.\n' "$external_ip"
+for firewall in iptables ip6tables; do
+    # Only replies to inbound administration may leave the external interface.
+    docker exec "$CLUSTER_NODE" "$firewall" -I OUTPUT 1 \
+        -m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j ACCEPT
+    docker exec "$CLUSTER_NODE" "$firewall" -I OUTPUT 2 -o "$external_iface" -j REJECT
+    docker exec "$CLUSTER_NODE" "$firewall" -I FORWARD 1 \
+        -m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j ACCEPT
+    docker exec "$CLUSTER_NODE" "$firewall" -I FORWARD 2 -o "$external_iface" -j REJECT
+done
 "$TOOLS_DIR/kind" load docker-image "$CURL_IMAGE" --name "$CLUSTER_NAME"
 printf 'Cluster prepared; external-interface egress rules installed before AIR-GAPPED begins.\n'
 
@@ -130,13 +141,13 @@ pause_for_presenter
 
 phase "2: AIR-GAPPED — internal Git, registry, cluster and Flux bootstrap"
 docker run --detach --name "$GITEA_CONTAINER" \
+    --pull=never \
     --network "$NETWORK_NAME" --network-alias gitea \
-    --publish 127.0.0.1:3000:3000 --publish 127.0.0.1:2222:22 \
     --volume offline-gitops-gitea-data:/data \
     --env USER_UID=1000 --env USER_GID=1000 \
     --env GITEA__database__DB_TYPE=sqlite3 \
     --env GITEA__security__INSTALL_LOCK=true \
-    --env GITEA__server__DISABLE_REGISTRATION=true \
+    --env GITEA__service__DISABLE_REGISTRATION=true \
     --env GITEA__server__SSH_DOMAIN=localhost \
     --env GITEA__server__SSH_PORT=2222 \
     --env GITEA__server__ROOT_URL=http://127.0.0.1:3000/ \
@@ -180,6 +191,7 @@ chmod 600 "$STATE_DIR/home/.ssh/known_hosts"
 export HOME="$STATE_DIR/home"
 ssh_url="ssh://git@$gitea_ip:22/$gitea_user/offline-gitops.git"
 git_ssh_command="ssh -i $ssh_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$STATE_DIR/home/.ssh/known_hosts -o StrictHostKeyChecking=yes"
+sha256sum --check "$STATE_DIR/bundle-checksums.txt"
 git clone "$STATE_DIR/offline.bundle" "$STATE_DIR/initial-import"
 git -C "$STATE_DIR/initial-import" remote add gitea "$ssh_url"
 GIT_SSH_COMMAND="$git_ssh_command" git -C "$STATE_DIR/initial-import" push gitea main
@@ -197,33 +209,10 @@ printf 'y\n' | "$TOOLS_DIR/flux" bootstrap git \
     --for=condition=Ready pod --all --timeout=5m
 "$TOOLS_DIR/flux" reconcile source git flux-system --timeout=2m
 "$TOOLS_DIR/flux" reconcile kustomization flux-system --with-source --timeout=5m
-"$TOOLS_DIR/kubectl" -n podinfo rollout status deployment/podinfo --timeout=5m
-
-printf 'Proving egress is unavailable from a Kubernetes pod...\n'
-"$TOOLS_DIR/kubectl" run external-egress-probe \
-    --image="$CURL_IMAGE" \
-    --image-pull-policy=IfNotPresent \
-    --restart=Never \
-    --command -- curl --silent --show-error --max-time 5 https://example.com \
-    >/dev/null
-probe_phase=""
-for attempt in {1..30}; do
-    probe_phase="$("$TOOLS_DIR/kubectl" get pod external-egress-probe \
-        -o jsonpath='{.status.phase}')"
-    [[ "$probe_phase" == "Failed" || "$probe_phase" == "Succeeded" ]] && break
-    sleep 1
-done
-[[ "$probe_phase" == "Failed" ]] ||
-    die "External HTTPS unexpectedly worked or the Kubernetes egress probe did not finish after $attempt attempts (phase: $probe_phase)."
-probe_exit_code="$("$TOOLS_DIR/kubectl" get pod external-egress-probe \
-    -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')"
-[[ "$probe_exit_code" != "0" ]] ||
-    die "The Kubernetes egress probe exited successfully."
-"$TOOLS_DIR/kubectl" logs pod/external-egress-probe || true
-"$TOOLS_DIR/kubectl" delete pod external-egress-probe --wait=true >/dev/null
-printf 'PASS: the Kubernetes pod cannot reach external HTTPS.\n'
-[[ "$(docker network inspect --format '{{.Internal}}' "$NETWORK_NAME")" == "true" ]] ||
-    die "The air-gap Docker network is no longer internal."
+"$TOOLS_DIR/flux" reconcile helmrelease podinfo -n podinfo --with-source --timeout=5m
+baseline_commit="$(GIT_SSH_COMMAND="$git_ssh_command" git ls-remote "$ssh_url" refs/heads/main | cut -f1)"
+verify_state 1 "Offline baseline from Git" "$baseline_commit"
+verify_isolation "$registry_ip" "$external_iface" "$external_ip"
 
 printf '\nInitial local evidence:\n'
 "$TOOLS_DIR/flux" get sources git -A
@@ -245,12 +234,13 @@ git -C "$STATE_DIR/update-import" fetch "$STATE_DIR/update.bundle" main
 update_commit="$(git -C "$STATE_DIR/update-import" rev-parse FETCH_HEAD)"
 git -C "$STATE_DIR/update-import" cherry-pick -x "$update_commit"
 GIT_SSH_COMMAND="$git_ssh_command" git -C "$STATE_DIR/update-import" push origin main
+imported_commit="$(git -C "$STATE_DIR/update-import" rev-parse HEAD)"
 
 "$TOOLS_DIR/flux" reconcile source git flux-system --timeout=2m
 "$TOOLS_DIR/flux" reconcile kustomization flux-system --with-source --timeout=5m
-"$TOOLS_DIR/kubectl" -n podinfo rollout status deployment/podinfo --timeout=5m
-"$TOOLS_DIR/kubectl" -n podinfo wait \
-    --for=jsonpath='{.spec.replicas}'=2 deployment/podinfo --timeout=2m
+"$TOOLS_DIR/flux" reconcile helmrelease podinfo -n podinfo --with-source --timeout=5m
+verify_state 2 "Updated through offline bundle" "$imported_commit"
+verify_isolation "$registry_ip" "$external_iface" "$external_ip"
 
 printf '\nUpdated local evidence:\n'
 "$TOOLS_DIR/flux" get sources git -A
@@ -258,8 +248,6 @@ printf '\nUpdated local evidence:\n'
 "$TOOLS_DIR/kubectl" -n podinfo get pods -o wide
 "$TOOLS_DIR/kubectl" -n podinfo get deployment podinfo \
     -o jsonpath='desired={.spec.replicas} ready={.status.readyReplicas}{"\n"}'
-grep -F 'Updated through offline bundle' \
-    "$STATE_DIR/update-import/clusters/demo/apps/podinfo/helm-release.yaml"
-printf '\nCOMPLETE: Flux reconciled the Gitea update with no external network route.\n'
+printf '\nCOMPLETE: Flux reconciled the Gitea update with external egress blocked.\n'
 printf 'Total runtime: %dm %02ds\n' "$(( (SECONDS - started_at) / 60 ))" "$(( (SECONDS - started_at) % 60 ))"
 printf 'Runtime remains available for inspection; run ./scripts/cleanup.sh when done.\n'

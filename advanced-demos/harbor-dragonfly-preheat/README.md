@@ -2,7 +2,7 @@
 
 | Spectrum level | Demo app | Headline tooling | Status |
 |----------------|----------|------------------|--------|
-| 1–2 | jenkins | harbor, dragonfly | 🚧 WIP |
+| 1–2 | jenkins | harbor, dragonfly | Tested 2026-10-17 |
 
 Enterprise registry hub + P2P preheat for large fleets
 
@@ -62,7 +62,9 @@ configuration, host firewall, Kubernetes cluster or privileged container is need
   socket in skopeo; this is root-equivalent access. Never give it to untrusted code.
 - At least 8 CPU cores, 12 GiB available RAM and **25 GiB free disk before the first
   run**; more is advisable on a shared machine. Ten destination copies plus six
-  peer caches are intentionally independent.
+  peer caches are intentionally independent. Each peer has a private 1 GiB tmpfs
+  cache (up to 6 GiB total, allocated on demand); this image occupies about
+  253 MB per cache. Registry data and copy destinations still use disk.
 - Access to Docker Hub, Quay and GitHub releases during CONNECTED.
 - Reserve Compose projects `offline-preheat` and `offline-preheat-harbor`, and
   network `offline-preheat-airgap`. Do not run two copies concurrently.
@@ -74,11 +76,11 @@ reuse this as a production registry deployment.
 
 ## Tested with
 
-Test date: **2026-10-16**, Linux amd64, kernel `7.0.0-38-generic`.
+Latest full test: **2026-10-17**, Linux amd64, kernel `7.0.0-38-generic`.
 
 | Component | Exact version |
 | --- | --- |
-| Docker Engine / CLI | 29.9.0 |
+| Docker Engine / CLI | 29.9.1 |
 | Docker Compose | 5.6.0 |
 | Bash | 5.2.21 |
 | Host curl / jq | 8.5.0 / 1.7 |
@@ -100,7 +102,7 @@ Version tags can be republished; this is an observed lock, not a supply-chain
 signature verification system.
 
 Jenkins `2.580.1` was the current LTS returned by
-<https://updates.jenkins.io/stable/latestCore.txt> on the test date; it is pinned,
+<https://updates.jenkins.io/stable/latestCore.txt> on 2026-10-16; it is pinned,
 not fetched dynamically by the demo. Its upstream manifest-list digest was:
 
 ```text
@@ -178,39 +180,41 @@ The script prints phase banners, real preheat status, per-namespace blocked
 probes, ten timing rows, a distribution table, and measured total runtime.
 Any failed command, copy, digest, origin or isolation assertion exits nonzero.
 
-The final complete verified run took **182 seconds** with tool images already cached.
+The latest complete verified run took **218 seconds** with tool images already cached.
 Cold external downloads are not included in that figure. Five-way concurrent
 copies in that run:
 
 | Consumer | Direct Harbor (ms) | Dragonfly (ms), Harbor blobs blocked |
 | --- | ---: | ---: |
-| 1 | 7,576 | 6,184 |
-| 2 | 7,421 | 6,184 |
-| 3 | 7,578 | 6,181 |
-| 4 | 7,433 | 6,220 |
-| 5 | 7,575 | 6,180 |
-| Mean | 7,516.6 | 6,189.8 |
+| 1 | 10,921 | 1,032 |
+| 2 | 10,920 | 1,026 |
+| 3 | 10,892 | 1,032 |
+| 4 | 10,920 | 1,023 |
+| 5 | 10,920 | 1,030 |
+| Mean | 10,914.6 | 1,028.6 |
 
 **No general speedup is claimed.** This single-host test shares disk, bridge and
-CPU. An earlier complete run took 193 seconds and measured 11,959.0 ms direct
-versus 12,856.6 ms P2P: P2P overhead can exceed direct reads. The final rerun also
+CPU. The latest run serves P2P pieces from tmpfs while Harbor is disk-backed,
+so its timing difference is **not an apples-to-apples P2P speedup measurement**.
+An earlier complete run took 193 seconds and measured 11,959.0 ms direct
+versus 12,856.6 ms P2P: P2P overhead can exceed direct reads. Prior reruns also
 verified teardown/reset/recreation idempotency. The reliable efficiency is offload:
 
 | Node | P2P proxy blob requests | Bytes uploaded to peers |
 | --- | ---: | ---: |
-| seed | 0 | 736,011,202 |
-| peer1 | 13 | 32,919,990 |
-| peer2 | 13 | 96,759,016 |
-| peer3 | 13 | 191,308,375 |
-| peer4 | 13 | 0 |
-| peer5 | 13 | 209,324,892 |
+| seed | 0 | 858,227,597 |
+| peer1 | 13 | 44,595,690 |
+| peer2 | 13 | 116,163,337 |
+| peer3 | 13 | 90,552,041 |
+| peer4 | 13 | 67,115,100 |
+| peer5 | 13 | 89,669,710 |
 
 The direct baseline fetched 5 x 253,264,695 = **1,266,323,475 payload bytes** from
 Harbor. Preheat fetched the image once. During the P2P arm Harbor served **zero**
 successful blob bytes, and seed origin traffic stayed at **253,264,695 bytes**.
 Consumers served one another; the seed was not the sole distributor.
 Retries and scheduling can change distribution on another run. A peer can
-receive the entire image without being chosen to upload any pieces (peer4 here).
+receive the entire image without being chosen to upload any pieces.
 
 Timing surrounds `docker run ... skopeo copy`, excluding digest rechecks; it
 includes client/container startup, local auth/manifest fetches, transfer and
@@ -245,15 +249,22 @@ cat artifacts/timings.csv
 cat artifacts/runtime.txt
 ```
 
+The standalone report requires every referenced metric and a nonempty
+blocked-origin gateway log. It rechecks source bytes rather than assuming zero;
+missing metrics or successful source blob transfers are errors, not defaults.
+
 ## Troubleshooting
 
 - **Preheat succeeds, blocked-source copies fail:** do not unblock the origin to
   make the demo green. Check seed eviction, canonical `http://harbor:8080` URLs,
   task IDs, scheduler logs and source counters. An early test hit disk-pressure
-  GC at 95% usage and correctly failed. The demo now uses 1 GiB/99% thresholds
-  so a nearly full shared sandbox does not immediately discard its small cache.
-  These are **demo-only** limits; provision dedicated storage and sensible
-  watermarks in production. Free space first if near either threshold.
+  GC at 95% usage and correctly failed; a later full retest also crossed 99%
+  while other workloads used the shared disk. Each peer now has a separate
+  1 GiB tmpfs at `/var/lib/dragonfly`, with an 80% GC watermark. This keeps the
+  ~253 MB cache below its own watermark regardless of host disk usage, without
+  disabling GC. Provision dedicated persistent storage in production. Larger
+  demo images require appropriately sized caches and memory; registry data and
+  destination copies still need disk headroom.
 - **Startup fails:** inspect [artifacts/dragonfly.log](artifacts/dragonfly.log)
   and [artifacts/harbor.log](artifacts/harbor.log). The scripts do not retry
   broken services forever. Manager precedes scheduler; scheduler precedes seed;
@@ -311,8 +322,8 @@ cat artifacts/runtime.txt
 - Historical pins have known lifecycle/security risks. Upgrade and harden both
   sides, enable TLS/auth, audit advisories and validate their API contract before
   any production use. HTTP-only is explicitly requested for this sandbox.
-- The seed must retain the image: peer caches are disposable container writable
-  layers, not a replacement for Harbor's durable registry data. No peer death,
+- The seed must retain the image: peer caches are disposable, independent tmpfs
+  mounts, not a replacement for Harbor's durable registry data. No peer death,
   eviction, token expiry or multi-hour offline survival claim is made.
 - Source-blocking is enforced on the canonical registry gateway, not by stopping
   Harbor; auth and manifests are deliberately retained. There is no central

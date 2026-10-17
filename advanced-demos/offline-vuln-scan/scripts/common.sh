@@ -70,3 +70,39 @@ require_docker() {
     require_command docker
     docker info >/dev/null 2>&1 || fail "Docker is unavailable or the current user cannot access it."
 }
+
+offline_run() {
+    docker run --rm --pull=never --network "$DEMO_NETWORK" \
+        --dns 127.0.0.1 --user "$(id -u):$(id -g)" \
+        --cap-drop ALL --security-opt no-new-privileges \
+        -e HOME=/tmp "$@"
+}
+
+repair_generated_ownership() {
+    local directory
+    for directory in "$DEMO_BUNDLE" "$DEMO_DIR/.state"; do
+        if [[ -d "$directory" ]]; then
+            docker run --rm --pull=never --network none --user 0:0 \
+                -v "$directory:/generated" "$DEMO_RUNTIME_IMAGE" \
+                chown -R "$(id -u):$(id -g)" /generated
+        fi
+    done
+}
+
+expect_network_failure() {
+    local description="$1" log="$2"
+    shift 2
+    local status
+    if "$@" >"$log" 2>&1; then
+        cat "$log"
+        fail "$description unexpectedly succeeded."
+    else
+        status=$?
+    fi
+    cat "$log"
+    [[ "$status" == 1 ]] ||
+        fail "$description returned $status instead of a scanner/network error (1)."
+    grep -Eiq 'lookup .*(:53|no such host)|network (is )?unreachable|no route to host|i/o timeout|timed out|connection refused|server misbehaving|operation not permitted|bad address' "$log" ||
+        fail "$description failed without evidence of a network error."
+    printf '%s: expected network failure (exit %s)\n' "$description" "$status"
+}

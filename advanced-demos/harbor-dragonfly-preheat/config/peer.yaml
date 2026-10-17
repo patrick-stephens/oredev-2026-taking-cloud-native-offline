@@ -1,4 +1,5 @@
 aliveTime: 0s
+dataDir: /var/lib/dragonfly
 keepStorage: true
 scheduler:
   manager:
@@ -32,7 +33,7 @@ upload:
 storage:
   taskExpireTime: 24h
   diskGCThreshold: 1Gi
-  diskGCThresholdPercent: 99
+  diskGCThresholdPercent: 80
   multiplex: true
 proxy:
   defaultFilter: "Expires&Signature&ns"

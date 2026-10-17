@@ -304,21 +304,27 @@ outage. For namespace/network errors, stop then start the demo. If the offline
 copy exceeds 15 seconds, check local Docker storage/CPU load and rehearse again.
 All network work is bounded by timeouts, but slow first-use downloads can still
 make a cold setup unsuitable for a five-minute slot: preload the tool images.
+The scripted Compose clients use `--interactive=false` as well as `-T`.
+Disabling the container TTY alone leaves Compose's stdin open; under GNU
+`timeout` in a real terminal that can stop the client with terminal job control.
+These clients never need stdin; only the presenter's phase prompt reads it.
 
 ### Recorded end-to-end results
 
-Tested on 2026-10-16 with a Linux amd64 Docker engine, Docker 29.9.0,
+Retested on 2026-10-17 with a Linux amd64 Docker engine, Docker 29.9.1,
 Compose v5.6.0 and the pinned container tools above:
 
 | Check | Result |
 | --- | --- |
-| Cold image cache, tools preloaded: start, prime, verify, stop | 15.2 seconds total |
-| Offline full-image copy to a fresh client | 2 seconds, below the enforced 15-second limit |
+| Cold image cache, tools preloaded: start, prime, verify, stop | 24 seconds total |
+| Warm cache: start, prime, verify, stop | 7 seconds total |
+| Offline full-image copy to a fresh client | At most 1 second, below the enforced 15-second limit |
 | Direct Docker Hub request with uplink detached | Failed with a DNS/network error, as required |
 | Cached manifest fingerprint before/after isolation | Identical |
 | Repeated start, prime, verify and stop; retained volume after restart | Passed |
 | Verification before priming | Failed explicitly with a priming instruction |
-| SIGTERM during the cache-only transition | Exit 143; proxy configuration and host API restored |
+| Real pseudo-terminal, including clears and banners | Passed after disabling Compose client stdin |
+| SIGTERM during the cache-only transition (2026-10-16 test) | Exit 143; proxy configuration and host API restored |
 | Repeated explicit volume purge | Passed |
 | Bash syntax, ShellCheck and Compose configuration validation | Passed |
 

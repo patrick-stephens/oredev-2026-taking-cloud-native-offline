@@ -40,6 +40,18 @@ check_host() {
 k() { docker exec -i "$NODE" /bin/k3s kubectl "$@"; }
 images() { docker exec "$NODE" /bin/k3s ctr images ls -q; }
 
+wait_for_resource() {
+  local namespace="$1" resource="$2" deadline=$((SECONDS + 120))
+  until k -n "$namespace" get "$resource" --request-timeout=10s \
+    > /dev/null 2>"$STATE/resource-wait.log"; do
+    (( SECONDS < deadline )) || {
+      cat "$STATE/resource-wait.log" >&2
+      die "Resource $namespace/$resource did not appear in 120 seconds."
+    }
+    sleep 2
+  done
+}
+
 expect_blocked() {
   local name="$1" rc
   shift

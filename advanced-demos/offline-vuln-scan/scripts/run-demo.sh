@@ -7,26 +7,38 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 started_at=$SECONDS
 
 require_docker
-for command_name in curl tar sha256sum jq timeout date du cut tail install stat; do
+for command_name in curl tar sha256sum jq timeout date du cut tail install stat grep uname id; do
     require_command "$command_name"
 done
 
+[[ "$(uname -s)" == Linux ]] || fail "This demo requires a Linux host."
 architecture="$(uname -m)"
 [[ "$architecture" == "x86_64" || "$architecture" == "aarch64" ]] ||
     fail "Only Linux x86_64 and aarch64 hosts are supported (found: $architecture)."
 release_arch="amd64"
-[[ "$architecture" == "aarch64" ]] && release_arch="arm64"
+trivy_arch="64bit"
+if [[ "$architecture" == "aarch64" ]]; then
+    # UNTESTED: ARM64 assets are selected, but full rehearsals used amd64.
+    release_arch="arm64"
+    trivy_arch="ARM64"
+fi
+
+phase "CONNECTED: download tools, databases, and image"
+docker pull "$DEMO_REGISTRY_IMAGE"
+docker pull "$DEMO_SKOPEO_IMAGE"
+docker pull "$DEMO_RUNTIME_IMAGE"
 
 if managed_container_exists "$DEMO_REGISTRY"; then
     docker rm --force "$DEMO_REGISTRY" >/dev/null
 fi
 
-if [[ -d "$DEMO_BUNDLE/oci" ]]; then
-    docker run --rm --user 0:0 -v "$DEMO_BUNDLE/oci:/oci" \
-        "$DEMO_RUNTIME_IMAGE" chown -R "$(id -u):$(id -g)" /oci
-fi
+repair_generated_ownership
 
 mkdir -p "$DEMO_DIR/.work" "$DEMO_DIR/artifacts" "$DEMO_DIR/.state"
+rm -f -- "$DEMO_DIR/.state/verification.json" "$DEMO_DIR/.state/trivy-offline.json" \
+    "$DEMO_DIR/.state/grype-offline.json" "$DEMO_DIR/.state/trivy-update-attempt.log" \
+    "$DEMO_DIR/.state/grype-update-attempt.log" "$DEMO_DIR/.state/egress-probe.log" \
+    "$DEMO_DIR/.state/policy-decision.log"
 rm -rf -- "$DEMO_BUNDLE" "$DEMO_STAGE"
 rm -f -- "$DEMO_ARCHIVE"
 mkdir -p "$DEMO_BUNDLE/bin" "$DEMO_BUNDLE/trivy-cache" \
@@ -46,11 +58,10 @@ verify_release_asset() {
         fail "Could not verify checksum for $(basename -- "$asset")."
 }
 
-phase "CONNECTED: download tools, databases, and image"
 printf 'Host architecture: %s (%s)\n' "$architecture" "$release_arch"
 printf 'Pinned scanners: Trivy %s, Grype %s\n' "$DEMO_TRIVY_VERSION" "$DEMO_GRYPE_VERSION"
 
-trivy_asset="trivy_${DEMO_TRIVY_VERSION#v}_Linux-64bit.tar.gz"
+trivy_asset="trivy_${DEMO_TRIVY_VERSION#v}_Linux-${trivy_arch}.tar.gz"
 grype_asset="grype_${DEMO_GRYPE_VERSION#v}_linux_${release_arch}.tar.gz"
 trivy_checksums="$DEMO_DIR/.work/trivy-checksums.txt"
 grype_checksums="$DEMO_DIR/.work/grype-checksums.txt"
@@ -75,10 +86,6 @@ fetch_release \
 verify_release_asset "$grype_checksums" "$grype_archive"
 tar -xzf "$grype_archive" -C "$DEMO_BUNDLE/bin" grype
 install -m 0644 "$DEMO_DIR/config/grype.yaml" "$DEMO_BUNDLE/grype.yaml"
-
-docker pull "$DEMO_REGISTRY_IMAGE"
-docker pull "$DEMO_SKOPEO_IMAGE"
-docker pull "$DEMO_RUNTIME_IMAGE"
 
 "$DEMO_BUNDLE/bin/trivy" --version
 "$DEMO_BUNDLE/bin/grype" version
@@ -121,11 +128,12 @@ for candidate in "${image_candidates[@]}"; do
 
     "$DEMO_BUNDLE/bin/trivy" image --cache-dir "$DEMO_BUNDLE/trivy-cache" \
         --skip-db-update --skip-version-check --disable-telemetry \
-        --scanners vuln --format json --output "$trivy_report" "$candidate"
+        --config '' --ignorefile '' --offline-scan --skip-java-db-update \
+        --scanners vuln --image-src docker --format json --output "$trivy_report" "$candidate"
     trivy_count="$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$trivy_report")"
 
     GRYPE_DB_CACHE_DIR="$DEMO_BUNDLE/grype-db" GRYPE_DB_AUTO_UPDATE=false \
-        "$DEMO_BUNDLE/bin/grype" "$candidate" -o json >"$grype_report"
+        "$DEMO_BUNDLE/bin/grype" -c "$DEMO_BUNDLE/grype.yaml" "docker:$candidate" -o json >"$grype_report"
     grype_count="$(jq '.matches | length' "$grype_report")"
     printf 'Connected validation counts: Trivy=%s, Grype=%s\n' "$trivy_count" "$grype_count"
 
@@ -138,6 +146,8 @@ for candidate in "${image_candidates[@]}"; do
 done
 [[ -n "$selected_image" ]] ||
     fail "No candidate had findings in both scanners; refusing to report a successful demo."
+printf 'Selected image: %s\n' "$selected_image"
+image_digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$selected_image")"
 
 printf '\nExporting %s to an OCI layout with Skopeo...\n' "$selected_image"
 docker run --rm \
@@ -150,6 +160,7 @@ docker run --rm \
 {
     printf 'tested_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'image=%s\n' "$selected_image"
+    printf 'image_digest=%s\n' "$image_digest"
     printf 'trivy_version=%s\n' "$DEMO_TRIVY_VERSION"
     printf 'grype_version=%s\n' "$DEMO_GRYPE_VERSION"
     printf 'trivy_db_updated_at=%s\n' "$trivy_db_updated"
@@ -158,12 +169,18 @@ docker run --rm \
     printf 'connected_trivy_cve_count=%s\n' "$selected_trivy_count"
     printf 'connected_grype_cve_count=%s\n' "$selected_grype_count"
 } > "$DEMO_BUNDLE/metadata.txt"
+GRYPE_DB_CACHE_DIR="$DEMO_BUNDLE/grype-db" "$DEMO_BUNDLE/bin/grype" db status -o json \
+    >"$DEMO_BUNDLE/grype-db-status.json"
+(cd "$DEMO_BUNDLE" && sha256sum bin/trivy bin/grype trivy-cache/db/* \
+    grype-db/6/* oci/image/index.json grype.yaml metadata.txt grype-db-status.json >SHA256SUMS)
 
 tar -czf "$DEMO_ARCHIVE" -C "$DEMO_DIR" .bundle
+sha256sum "$DEMO_ARCHIVE" >"$DEMO_ARCHIVE.sha256"
 mkdir -p "$DEMO_STAGE"
 tar -xzf "$DEMO_ARCHIVE" -C "$DEMO_STAGE"
 rm -rf -- "$DEMO_BUNDLE" "$DEMO_DIR/.work"
 bundle="$DEMO_STAGE/.bundle"
+(cd "$bundle" && sha256sum --check SHA256SUMS)
 printf '\nTransport archive: %s (%s)\n' "$DEMO_ARCHIVE" "$(du -h "$DEMO_ARCHIVE" | cut -f1)"
 cat "$bundle/metadata.txt"
 
@@ -174,7 +191,7 @@ ensure_internal_network
     fail "Docker did not create an internal network."
 
 mkdir -p "$DEMO_DIR/.state/registry-data"
-docker run --detach \
+docker run --detach --pull=never --user "$(id -u):$(id -g)" \
     --name "$DEMO_REGISTRY" \
     --label "$DEMO_NETWORK_LABEL" \
     --network "$DEMO_NETWORK" \
@@ -183,8 +200,18 @@ docker run --detach \
     "$DEMO_REGISTRY_IMAGE" >/dev/null
 
 printf 'Internal network: %s (Internal=true)\n' "$DEMO_NETWORK"
+offline_run "$DEMO_RUNTIME_IMAGE" sh -ec '
+    for attempt in 1 2 3 4 5; do
+        if wget -q -O /dev/null http://registry:5000/v2/; then exit 0; fi
+        sleep 1
+    done
+    echo "Registry did not become ready" >&2
+    exit 1
+'
+expect_network_failure "Direct-IP egress probe" "$DEMO_DIR/.state/egress-probe.log" \
+    offline_run "$DEMO_RUNTIME_IMAGE" wget -T 3 -t 1 -O /dev/null http://1.1.1.1/
 printf 'Importing OCI layout into the isolated registry...\n'
-docker run --rm --network "$DEMO_NETWORK" \
+offline_run \
     -v "$bundle:/bundle:ro" \
     "$DEMO_SKOPEO_IMAGE" \
     copy --all "oci:/bundle/oci/image:offline-vuln-scan" \
@@ -195,10 +222,11 @@ trivy_offline_report="$DEMO_DIR/.state/trivy-offline.json"
 grype_offline_report="$DEMO_DIR/.state/grype-offline.json"
 
 printf '\nTrivy offline scan (DB update explicitly skipped)...\n'
-docker run --rm --network "$DEMO_NETWORK" \
+offline_run \
     -v "$bundle:/bundle" \
     "$DEMO_RUNTIME_IMAGE" /bundle/bin/trivy image \
     --cache-dir /bundle/trivy-cache --skip-db-update --skip-version-check \
+    --config '' --ignorefile '' --offline-scan --skip-java-db-update \
     --disable-telemetry --scanners vuln --image-src remote --insecure \
     --format json --output /bundle/trivy-offline.json "$image_ref"
 cp "$bundle/trivy-offline.json" "$trivy_offline_report"
@@ -207,7 +235,7 @@ trivy_offline_count="$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$trivy_of
     fail "Trivy offline scan returned no CVEs; offline success is not proven."
 
 printf '\nGrype offline scan (DB auto-update disabled)...\n'
-docker run --rm --network "$DEMO_NETWORK" \
+offline_run \
     -e GRYPE_DB_CACHE_DIR=/bundle/grype-db \
     -e GRYPE_DB_AUTO_UPDATE=false \
     -e GRYPE_REGISTRY_INSECURE_USE_HTTP=true \
@@ -219,39 +247,51 @@ grype_offline_count="$(jq '.matches | length' "$grype_offline_report")"
 (( grype_offline_count > 0 )) ||
     fail "Grype offline scan returned no CVEs; offline success is not proven."
 printf 'Offline findings: Trivy=%s; Grype=%s\n' "$trivy_offline_count" "$grype_offline_count"
+[[ "$trivy_offline_count" == "$selected_trivy_count" && "$grype_offline_count" == "$selected_grype_count" ]] ||
+    fail "Offline finding counts differ from connected validation."
+
+trivy_cves="$(jq '[.Results[]?.Vulnerabilities[]?.VulnerabilityID | select(startswith("CVE-"))] | unique | length' "$trivy_offline_report")"
+grype_cves="$(jq '[.matches[].vulnerability.id | select(startswith("CVE-"))] | unique | length' "$grype_offline_report")"
+printf 'Distinct CVE IDs: Trivy=%s; Grype=%s\n' "$trivy_cves" "$grype_cves"
+
+if jq -e '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH" or .Severity == "CRITICAL")] | length == 0' \
+    "$trivy_offline_report" >"$DEMO_DIR/.state/policy-decision.log"; then
+    fail "Expected the vulnerable image to fail the HIGH/CRITICAL policy."
+else
+    policy_rc=$?
+    [[ "$policy_rc" == 1 ]] || fail "Policy evaluation failed with unexpected exit $policy_rc."
+    printf 'Policy decision: DENY (HIGH/CRITICAL findings; exit 1)\n'
+fi
 
 printf '\nForcing Trivy DB update from inside the internal network (failure expected)...\n'
-if timeout 45s docker run --rm --network "$DEMO_NETWORK" \
+expect_network_failure "Trivy forced update" "$DEMO_DIR/.state/trivy-update-attempt.log" \
+    offline_run \
     -v "$bundle:/bundle" \
     "$DEMO_RUNTIME_IMAGE" /bundle/bin/trivy image --download-db-only \
     --cache-dir /tmp/trivy-update-probe --skip-version-check --disable-telemetry \
-    --timeout 12s >"$DEMO_DIR/.state/trivy-update-attempt.log" 2>&1; then
-    cat "$DEMO_DIR/.state/trivy-update-attempt.log"
-    fail "Trivy unexpectedly updated its DB on the internal-only network."
-else
-    trivy_update_rc=$?
-    printf 'Expected failure (exit %s):\n' "$trivy_update_rc"
-    tail -n 8 "$DEMO_DIR/.state/trivy-update-attempt.log"
-fi
+    --timeout 12s
 
 printf '\nForcing Grype DB update from inside the internal network (failure expected)...\n'
-if timeout 45s docker run --rm --network "$DEMO_NETWORK" \
-    -e GRYPE_DB_CACHE_DIR=/bundle/grype-db \
+expect_network_failure "Grype forced update" "$DEMO_DIR/.state/grype-update-attempt.log" \
+    offline_run \
+    -e GRYPE_DB_CACHE_DIR=/tmp/grype-update-probe \
     -e GRYPE_DB_AUTO_UPDATE=true \
     -e GRYPE_DB_UPDATE_AVAILABLE_TIMEOUT=8s \
     -e GRYPE_DB_UPDATE_DOWNLOAD_TIMEOUT=8s \
     -v "$bundle:/bundle" \
-    "$DEMO_RUNTIME_IMAGE" /bundle/bin/grype -c /bundle/grype.yaml db update \
-    >"$DEMO_DIR/.state/grype-update-attempt.log" 2>&1; then
-    cat "$DEMO_DIR/.state/grype-update-attempt.log"
-    fail "Grype unexpectedly updated its DB on the internal-only network."
-else
-    grype_update_rc=$?
-    printf 'Expected failure (exit %s):\n' "$grype_update_rc"
-    tail -n 8 "$DEMO_DIR/.state/grype-update-attempt.log"
-fi
+    "$DEMO_RUNTIME_IMAGE" /bundle/bin/grype -c /bundle/grype.yaml db update
 
 printf '\nRegistry stays up only on the internal network; no host-published port is needed.\n'
-printf 'Total elapsed: %ss\n' "$((SECONDS - started_at))"
+elapsed="$((SECONDS - started_at))"
+jq -n --arg tested_at "$(date -u +%FT%TZ)" --arg image "$selected_image" --arg digest "$image_digest" \
+    --argjson runtime_seconds "$elapsed" --argjson trivy_findings "$trivy_offline_count" \
+    --argjson grype_matches "$grype_offline_count" --argjson trivy_distinct_cves "$trivy_cves" \
+    --argjson grype_distinct_cves "$grype_cves" \
+    '{tested_at:$tested_at,image:$image,digest:$digest,runtime_seconds:$runtime_seconds,
+      trivy_findings:$trivy_findings,grype_matches:$grype_matches,
+      trivy_distinct_cves:$trivy_distinct_cves,grype_distinct_cves:$grype_distinct_cves,
+      policy:"DENY",direct_ip_egress:"blocked",trivy_update_exit:1,grype_update_exit:1}' \
+    >"$DEMO_DIR/.state/verification.json"
+printf 'Total elapsed: %ss\n' "$elapsed"
 printf 'Run scripts/cleanup.sh to remove the registry and network.\n'
 presenter_pause

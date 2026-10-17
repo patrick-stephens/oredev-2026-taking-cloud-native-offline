@@ -406,7 +406,7 @@ DEMO_AUTO_ADVANCE=1 ./run-demo.sh --tamper
 
 ## Tested with
 
-Test date: **2026-10-16**, native Linux amd64:
+Retest date: **2026-10-17**, native Linux amd64:
 
 | Component | Exact version |
 | --- | --- |
@@ -419,7 +419,7 @@ Test date: **2026-10-16**, native Linux amd64:
 | Official PostgreSQL | docker.io/library/postgres:18.6-alpine3.23 |
 | Self-authored chart | offline-postgresql 0.1.0 |
 
-**Full fresh run: 59 seconds**, including connected packaging/image capture,
+**Full fresh run: 56 seconds; real pseudo-terminal run: 60 seconds**, including connected packaging/image capture,
 tamper rejection, isolated import, Running/Ready pod, Bound PVC, authenticated
 TCP SQL query and cleanup, with tool/node images preloaded. Cold downloads and
 presenter pauses vary; rehearse on the talk machine.
@@ -432,8 +432,10 @@ Additional checks passed:
 - A deliberately wrong TCP password was rejected.
 - Modified image manifest/blob, chart and values were rejected with exit 42;
   modified inventory failed Cosign verification.
+- Unsigned extra files, archive symlinks and path traversal were rejected.
 - Private credentials were absent from the archive.
 - Bash syntax, ShellCheck and Helm lint passed. Render checks confirmed digest
   precedence, default-StorageClass behavior, and rejection of a missing Secret
   name or malformed digest.
 - Cleanup left no demo target containers; repeat cleanup succeeded.
+- The full `--tamper` flow passed in a real pseudo-terminal with clears/banners.

@@ -24,7 +24,7 @@ not a broken demo.
   present, leave the default two-second narration pauses enabled, and retain
   a captured rehearsal transcript if the venue does not permit live Docker.
 - Allow 2-4 minutes for narration. The measured warm end-to-end execution was
-  40 seconds; first-use downloads are not included in that expectation.
+  54 seconds on 2026-10-17; first-use downloads are not included in that expectation.
 - For stronger theater, transfer the directory to a host with its external
   interfaces disconnected and run `./scripts/run-demo.sh --offline`.
   The internal-network demo does not require disconnecting the presenter's
@@ -92,9 +92,10 @@ Do not present the untested VM fallback as a tested capability.
 
 Prepare with `./scripts/run-demo.sh --k0s --prepare-only`, then present with
 `./scripts/run-demo.sh --k0s --offline`. For an all-in-one rehearsal, use
-`./scripts/run-demo.sh --k0s`. The measured full warm run took 119 seconds;
+`./scripts/run-demo.sh --k0s`. The measured full warm run took 138 seconds;
 allow another 3-5 minutes for narration. The final offline-only repeat took
-79 seconds. The k0s bundle is about 1016 MiB and independent of the k3s bundle.
+108 seconds. These runs were reverified on 2026-10-17. The k0s bundle is about
+1016 MiB and independent of the k3s bundle.
 
 Keep the comparison focused on three differences:
 
@@ -179,6 +180,10 @@ documented. These are useful preparation lessons, not hidden failures.
 The k0s stretch also exposed an entrypoint DNS rewrite that assumed a default
 gateway and kube-router's need for a Service-IP route. Neither was fixed by
 giving the node an internet connection.
+The next-day retest caught another real race: node `Ready` preceded creation
+of a bundled Deployment. Both modes now wait for required resources to exist
+before waiting for their rollouts; do not equate node readiness with complete
+platform readiness.
 
 **Will this survive an upgrade?**
 

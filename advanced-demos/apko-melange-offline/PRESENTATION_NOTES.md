@@ -2,73 +2,75 @@
 
 ## Story
 
-Minimal images reduce the patch surface, but the important question is whether
-the image supply chain can operate after disconnect. This demo makes the
-boundary visible: acquire and verify the inputs while connected, then remove
-network access before building the APK, assembling the image, publishing it
-to zot, and running it in k3d.
+Minimal images reduce the runtime patch surface, but that is only half the
+supply-chain question. This demo tests whether the APK build and OCI assembly
+can continue after disconnect. The reveal is that the *build* can be offline,
+but only after connected staging has acquired exact inputs and trust keys.
 
 ## Key beats
 
-1. **Set the hypothesis.** `--offline` alone does not guarantee a build can
-   happen without network; first identify every package and runtime artifact
-   the build and cluster need.
-2. **Show the connected staging boundary.** The script downloads checksum-
-   verified tools, digest-pinned container images, a signed Alpine index and
-   recursive APK closure, plus Alpine public keys. Call out that Alpine's
-   configured endpoint is rolling.
-3. **Prove the boundary before building.** In AIR-GAPPED, show the bubblewrap
-   namespace has only `lo` and the direct-IP probe fails. Then show an Alpine
-   container cannot reach an external IP from the Docker `--internal` network.
-4. **Build the package.** melange creates and signs the greeter APK from the
-   staged package repo. No network is available to the build process.
-5. **Assemble and deliver the image.** apko runs with `--offline`; the image is
-   loaded into the k3d node's containerd and pushed across the internal network
-   to zot.
-6. **Explain the runtime dependency.** Kubernetes needs its pause sandbox
-   image as well as the application image. It is prefetched while connected
-   and imported before scheduling, so kubelet does not try to reach Docker Hub.
-7. **Close on the actual conclusion.** Both builds and the workload operate
-   offline after staging. Internet is still required to acquire tool releases,
-   base/runtime images, and APK inputs. The endpoint table is the key result.
+1. **Frame the hypothesis.** `apko --offline` is not enough by itself. The
+   recipe, APK closure, trust roots, runtime images, and cluster sandbox image
+   all need to be accounted for.
+2. **Show CONNECTED staging.** Point to the pinned tool/image versions and the
+   signed Alpine indexes, recursively fetched Go APK closure, and Alpine
+   public keys. Call out the rolling `v3.22` repository.
+3. **Prove AIR-GAPPED starts before the builds.** Bubblewrap reports only
+   `lo`, and an external-IP probe fails. A container and the k3d node also fail
+   their egress probes from Docker's `--internal` network.
+4. **Build the APK.** melange compiles the standard-library Go program from
+   local source and staged APKs, then signs its package with an ephemeral
+   local key. The Go toolchain cannot use a proxy or download another toolchain.
+5. **Assemble the minimal image.** apko runs with `--offline`, and the
+   footprint file gives the measured nginx-versus-apko size difference.
+6. **Trace local registry delivery.** The k3d node pushes the image to zot
+   over the internal bridge. The app image is removed from node containerd
+   before deployment; Kubernetes then pulls it from zot through the mirror.
+7. **Surface the hidden runtime dependency.** Kubernetes also needs its pause
+   image. That image is prefetched while connected and imported locally, so a
+   pod sandbox does not quietly fall back to Docker Hub.
+8. **Close on the honest boundary.** The build and workload need no external
+   egress after staging. The host remains connected-capable, and first-time
+   staging still needs the endpoints in the README table.
 
 ## Likely questions
 
-- **Does this mean melange always builds offline?** No. This proves the
-  included recipe and staged inputs. Recipes that fetch sources or require
-  undeclared external inputs will fail under the network namespace.
-- **What is the unavoidable network?** The connected phase reaches release
-  download endpoints, Docker Hub/GHCR image registries and blob delivery, and
-  Alpine's package CDN/mirrors. Redirects and CDN hosts can vary; see the
-  README dependency table.
-- **Why both bubblewrap and Docker `--internal`?** bubblewrap isolates the
-  host-side melange/apko process. The internal Docker network isolates zot,
-  k3d, and test containers. One boundary does not protect the other.
-- **Why explicitly stage the pause image?** Kubernetes creates a sandbox
-  container before starting the workload. Without the image in containerd,
-  kubelet attempts a remote Docker Hub pull even when the application image is
-  available locally.
-- **Are the APK dependencies permanently pinned?** No. Their versions are
-  recorded from the signed index fetched during staging, but Alpine's
-  `v3.22/main` is rolling. A permanent rebuild needs an immutable snapshot or
-  preserved signed repository snapshot.
-- **Is the cluster physically air-gapped?** It has no external Docker network
-  egress, and network probes verify this. The host and Docker daemon remain
-  connected-capable during phase transitions; AIR-GAPPED cluster containers
-  can communicate only on the internal Docker network.
-- **Why adjust disk-pressure eviction?** It is an optional workaround for the
-  test sandbox's constrained reported capacity. It is disabled by default and
-  should not be used as a production recommendation.
-- **Does a tiny image mean a complete secure supply chain?** No. The demo
-  reduces the runtime package set and makes acquisition visible, but it does
-  not validate upstream provenance, make the rolling repository reproducible,
-  or establish a full trust root for all artifacts.
+- **Does this prove every melange recipe is offline-safe?** No. It verifies
+  this recipe, whose source is local and whose dependency closure is staged.
+  A recipe that fetches source or runs networked tooling should fail.
+- **What network is unavoidable?** GitHub release endpoints, `dl.k8s.io`,
+  Docker Hub/GHCR, and Alpine's package CDN/mirror path during CONNECTED
+  staging. Blob delivery may redirect to CDN/object-storage hosts.
+- **Why both bubblewrap and Docker `--internal`?** Bubblewrap isolates
+  host-side melange/apko. The Docker internal bridge isolates zot and k3d.
+  Neither boundary substitutes for the other.
+- **Why add a default route to the k3d node?** k3s refuses to start without
+  one. The route points only at the internal bridge gateway; a direct-IP
+  probe verifies that Docker still blocks external egress.
+- **Why not push from the host Docker CLI?** Docker treats a non-loopback
+  registry address as HTTPS, and Docker does not publish ports on this
+  internal network. `ctr` pushes from the node to zot over internal HTTP
+  without weakening host daemon registry settings.
+- **Why stage the pause image?** It is required before a workload container
+  can start. Without it, kubelet attempts a remote Docker Hub pull even when
+  the application image is already in zot.
+- **Is the package set reproducible forever?** Not yet. The upstream Alpine
+  branch is rolling; an immutable APK snapshot and replayable source bundle
+  are needed for that stronger guarantee.
+- **Is the cluster physically air-gapped?** No. Demo containers have no
+  external egress, but the host and Docker daemon remain capable of internet
+  access between phases.
+- **Why might the command relax disk eviction?** This test sandbox reported
+  disk pressure. The opt-in 0.1% threshold is restricted to a disposable
+  cluster; do not use it as a production setting.
+- **Does the smaller image prove the service is more secure?** It reduces the
+  runtime package footprint, but does not establish upstream provenance,
+  vulnerability status, or a complete trust chain.
 
 ## Presenter controls
 
-Run `scripts/run-demo.sh` in a terminal. Set `DEMO_SLEEP_SECONDS=0` to skip
-narration pauses, or set a larger value for a slower live walkthrough. Use
-`DEMO_RELAX_DISK_EVICTION=true` only if the disposable node in the venue has
-the same low reported ephemeral-storage capacity as the tested sandbox.
-`scripts/cleanup.sh` removes only demo-owned runtime resources and generated
-state.
+Run `scripts/run-demo.sh` from this directory. The default two-second pause
+between phases gives time to narrate; set `DEMO_SLEEP_SECONDS=0` to skip it.
+Use `DEMO_RELAX_DISK_EVICTION=true` only if the venue sandbox has the same
+disk-pressure constraint as the tested environment. Finish with
+`scripts/cleanup.sh` to remove only this demo's runtime resources and state.

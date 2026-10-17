@@ -4,7 +4,25 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 
 metric() {
-    awk -v key="$1" '$1 == key {n += $2} END {printf "%.0f\n", n+0}' "$2"
+    awk -v key="$1" '
+        $1 == key {n += $2; found=1}
+        END {
+            if (!found) {
+                print "Missing required metric: " key > "/dev/stderr"
+                exit 1
+            }
+            printf "%.0f\n", n
+        }' "$2"
+}
+[[ -s "$ROOT/artifacts/gateway-blocked.log" ]] || {
+    echo "Missing or empty blocked-origin gateway log." >&2
+    exit 1
+}
+origin_bytes="$(awk '/ (GET|HEAD) .*\/blobs\/sha256:/ && $(NF-1) ~ /^2/ {n += $NF} END {print n+0}' \
+    "$ROOT/artifacts/gateway-blocked.log")"
+[[ "$origin_bytes" == 0 ]] || {
+    echo "Source served $origin_bytes blob bytes after cutover!" >&2
+    exit 1
 }
 before="$(metric 'dragonfly_dfdaemon_seed_peer_download_traffic{type="back_to_source"}' "$ROOT/artifacts/seed-before.prom")"
 after="$(metric 'dragonfly_dfdaemon_seed_peer_download_traffic{type="back_to_source"}' "$ROOT/artifacts/seed-after.prom")"
@@ -35,5 +53,5 @@ expected_requests="$(jq '.layers | length + 1' "$ROOT/artifacts/manifest.json")"
 awk -F, 'NR>1 {n[$1]++;sum[$1]+=$3}
     END {for (m in n) printf "%s mean cold copy: %.1f ms (%d consumers)\n",m,sum[m]/n[m],n[m]}' \
     "$ROOT/artifacts/timings.csv" | tee "$ROOT/artifacts/summary.txt"
-printf 'Seed origin bytes unchanged: %s; successful origin blob bytes after cutover: 0\n' \
-    "$after" | tee -a "$ROOT/artifacts/summary.txt"
+printf 'Seed origin bytes unchanged: %s; successful origin blob bytes after cutover: %s\n' \
+    "$after" "$origin_bytes" | tee -a "$ROOT/artifacts/summary.txt"

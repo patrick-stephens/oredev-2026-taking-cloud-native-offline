@@ -4,6 +4,8 @@ x-peer: &peer
   pull_policy: never
   volumes:
     - ../.state/peer.yaml:/etc/dragonfly/dfget.yaml:ro
+  tmpfs:
+    - /var/lib/dragonfly:size=1073741824,mode=0755
   networks: [harbor]
   restart: "no"
   healthcheck:

@@ -62,7 +62,7 @@ done <<<"$attached_networks"
 printf 'ISOLATED: only the internal Docker network remains; the host is unaffected.\n'
 
 printf '\nDirect Docker Hub pull must fail (maximum 8 seconds of registry work):\n'
-if failure="$(timeout 20s "${COMPOSE[@]}" run --rm --no-deps -T skopeo \
+if failure="$(timeout 20s "${COMPOSE[@]}" run --rm --no-deps -T --interactive=false skopeo \
     --command-timeout 8s inspect --raw "$HUB_IMAGE" 2>&1)"; then
     die "Docker Hub unexpectedly remained reachable."
 else

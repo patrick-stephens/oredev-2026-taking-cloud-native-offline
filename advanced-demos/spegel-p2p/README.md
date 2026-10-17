@@ -291,7 +291,7 @@ Test date: **2026-10-16**.
 - Redis **docker.io/library/redis:alpine**, resolved during the test to
   `sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0`
 
-Validated end-to-end in **62 seconds** for the default run and **61 seconds**
+Validated end-to-end in **84 seconds** for the default run and **75 seconds**
 with the optional rollback exercise, including cleanup. All three pods
 reached `Running`; agent 1's containerd gained Redis with the registry stopped,
 all node and pod egress probes were blocked, and Spegel reported peer mirror

@@ -58,11 +58,11 @@ with this demo directory.
 
 ## Tested with
 
-Tested on **2026-10-16**, Linux amd64:
+Tested on **2026-10-17**, Linux amd64:
 
 | Tool/input | Pinned or observed version |
 |---|---|
-| Docker Engine and CLI | 29.9.0 |
+| Docker Engine and CLI | 29.9.1 |
 | Python artifact/build image | `python:3.12.8-slim-bookworm` |
 | Flask | 3.1.0 |
 | pip in the Python image | 24.3.1 |
@@ -74,6 +74,7 @@ Tested on **2026-10-16**, Linux amd64:
 | Debian utility image | `debian:bookworm-slim` |
 | C utility / Debian packages | `jq` 1.6 (`jq` / `libjq1` `1.6-2.1+deb12u2`; `libonig5` `6.9.8-1`) |
 | Optional npm mirror | `verdaccio/verdaccio:6.2.3` |
+| Node runtime bundled in Verdaccio image | 22.21.1 |
 
 Image tags are pinned in [`config/base-images.env`](config/base-images.env);
 application libraries are pinned in their requirements/lock/module files.

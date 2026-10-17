@@ -12,7 +12,7 @@ for command in flock jq diff sha256sum; do
 done
 check_docker
 mkdir -p "$ROOT/.state"
-exec 9>"$ROOT/.state/demo.lock"
+exec 9>"$ROOT/.demo.lock"
 flock -n 9 || die "Another run or cleanup is using this demo."
 RUN_DIR="$ROOT/.state/run-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 mkdir -p "$RUN_DIR"

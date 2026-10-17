@@ -27,7 +27,7 @@ the interesting change is the supply-chain packaging around a familiar image.
   DEMO_PAUSE_SECONDS=8 ./scripts/run-demo.sh
   ```
 
-- Default two-second sleeps gave an 18-second warm rehearsal on 2026-10-16;
+- Default two-second sleeps gave 18- and 78-second warm rehearsals on 2026-10-17;
   allow two to four minutes for explanation, not just command execution.
   Banners clear an interactive terminal, but evidence is retained under
   `.state/latest`. Redirected output is not cleared.

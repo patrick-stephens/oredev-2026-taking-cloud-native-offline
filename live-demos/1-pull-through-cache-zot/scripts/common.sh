@@ -56,7 +56,7 @@ ensure_online() {
 
 skopeo_run() {
     # Bound every operation, including Compose startup, without host-installed skopeo.
-    timeout 100s "${COMPOSE[@]}" run --rm --no-deps -T skopeo \
+    timeout 100s "${COMPOSE[@]}" run --rm --no-deps -T --interactive=false skopeo \
         --command-timeout 90s "$@"
 }
 

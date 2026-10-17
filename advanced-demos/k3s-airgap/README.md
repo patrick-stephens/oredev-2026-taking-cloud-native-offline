@@ -1,10 +1,10 @@
 # Step zero: install Kubernetes without the internet
 
-| Spectrum level | Demo app | Headline tooling | Status |
-|----------------|----------|------------------|--------|
-| 3–4 | whoami | k3s | 🚧 WIP |
+| Spectrum level | Demo app | Headline tooling |
+|----------------|----------|------------------|
+| 3 | whoami | k3s, k0s |
 
-Official k3s air-gap install: never-online node running seeded images
+Offline k3s/k0s bootstrap: never-online nodes running seeded images
 
 [Offline spectrum](../../docs/offline-spectrum.md) · [Top-level README](../../README.md)
 
@@ -59,7 +59,7 @@ BusyBox diagnostic uses an image already included in the official k3s archive.
 
 ## Tested with
 
-Test date: **2026-10-16**, native Linux amd64, kernel `7.0.0-38-generic`,
+Test date: **2026-10-17**, native Linux amd64, kernel `7.0.0-38-generic`,
 rootful Docker with cgroup v2.
 
 | Component | Pinned / tested version |
@@ -68,7 +68,7 @@ rootful Docker with cgroup v2.
 | Node image | `rancher/k3s:v1.37.1-k3s1` |
 | Application | `docker.io/traefik/whoami:v1.12.0` |
 | Helm (downloaded, not the host installation) | `v4.3.1` |
-| Docker client / Engine | `29.9.0` / `29.9.0` |
+| Docker client / Engine | `29.9.1` / `29.9.1` |
 | Docker's containerd / runc | `v2.4.2` / `1.5.2` |
 | Bash / curl / jq | `5.2.21` / `8.5.0` / `1.7` |
 | ShellCheck (validation only) | `0.9.0` |
@@ -90,11 +90,12 @@ bundle checksums detect transfer corruption, not a malicious preparation host.
 
 ### Measured results
 
-- **Complete connected-to-air-gapped rehearsal: 40 seconds**, including the
+- **Complete connected-to-air-gapped rehearsal: 54 seconds**, including the
   default two-second phase pauses; downloaded artifacts and Docker images were
   warm, but the node and its containerd store were recreated from scratch.
-- **Final offline-only rehearsal: 35 seconds**, including pod-level checks and
-  the default pauses, again with a fresh node. First-use download time is connection-dependent; allow
+- **Offline-only repeat: 41 seconds**, including pod-level checks and
+  the default pauses, again with a fresh node. First-use download time is
+  connection-dependent; allow
   several minutes rather than promising the warm-cache timing.
 - Transfer bundle: approximately **630 MiB** on the tested engine.
 - Verified: one Ready node; healthy CoreDNS and local-path-provisioner;
@@ -102,9 +103,20 @@ bundle checksums detect transfer corruption, not a malicious preparation host.
   `imagePullPolicy: Never`; an actual whoami HTTP response; local service DNS
   and HTTP from a pod; failed external IP/DNS probes from node and pod; and
   `ErrImagePull` / `ImagePullBackOff` for an absent image.
-- Bash syntax, ShellCheck and strict Helm chart lint passed.
+- Bash syntax, ShellCheck, strict Helm chart lint and Kubernetes server-side
+  manifest dry runs passed.
+- Failure-path tests passed: corrupt transfers are rejected before replacing
+  existing nodes, delayed bundled resources are retried with a bounded wait,
+  missing resources fail explicitly, and cleanup refuses unowned containers.
 - Repeated cleanup passed and removed the node, network and all four of the
   node image's anonymous volumes.
+
+The 2026-10-17 retest found and fixed a startup race: node `Ready` can precede
+the bundled Deployments/DaemonSets. Both modes now wait up to 120 seconds for
+each required resource to exist (with a 10-second per-request timeout), then
+perform the existing bounded rollout checks. A missing CoreDNS Deployment is
+not treated as a successful or skipped check. Rehearsal transcripts and probe
+evidence remain locally in the ignored [.state/](.state/) directory.
 
 ## Prerequisites
 
@@ -266,10 +278,9 @@ this demo directory**; neither imports anything from another demo.
 
 ### Tested with and measured results
 
-Test date: **2026-10-16**, native Linux amd64, kernel `7.0.0-38-generic`,
-rootful Docker with cgroup v2. Host utilities and Helm match the table above,
-except Docker had been updated to **client/Engine `29.9.1`** for this rehearsal.
-Docker's containerd remained `v2.4.2` and runc `1.5.2`.
+Test date: **2026-10-17**, native Linux amd64, kernel `7.0.0-38-generic`,
+rootful Docker with cgroup v2. Host utilities, Helm and Docker match the table
+above: client/Engine `29.9.1`, Docker's containerd `v2.4.2` and runc `1.5.2`.
 
 | Component | Pinned / observed version |
 | --- | --- |
@@ -286,13 +297,13 @@ Observed node-image digest:
 sha256:1105df6665d2bc0278e64258698f7f5c2fba19cbe7525dbf4457dc2c6c69f230
 ```
 
-The full connected-to-offline rehearsal took **119 seconds**, with cached
+The full connected-to-offline rehearsal took **138 seconds**, with cached
 downloads, a fresh node/containerd store and the default narration pauses.
-The final offline-only repeat took **79 seconds**, including manifest-owner
+The offline-only repeat took **108 seconds**, including manifest-owner
 and no-default-route assertions. First-use download
 time varies; the k0s transfer bundle occupies approximately **1016 MiB**.
-The original k3s offline path also passed regression testing after sharing the
-negative-control helper (62 seconds while rehearsing alongside k0s).
+Both distributions passed both full connected-to-offline and fresh-node
+offline-only replays. The offline-only runs were executed concurrently.
 
 Verified: one Ready node with no DiskPressure; healthy CoreDNS, kube-router
 and kube-proxy; automatically imported platform/workload archives; a whoami
@@ -453,6 +464,7 @@ disconnected host/VM and disable its external NICs.
 | `ErrImageNeverPull` on whoami | Inspect auto-import logs, exact image reference and architecture. Loading an image into host Docker alone does not seed containerd. |
 | `DiskPressure` or images vanish later | Free Docker storage. This disposable demo uses 1 GiB node/image free-space eviction thresholds and 99/98% image GC thresholds because default percentage thresholds can evict pods on large, nearly-full hosts. These are not production recommendations. |
 | API/rollout timeout | Check CPU/RAM, host route overlaps and logs. Timeouts are bounded and treated as failures. |
+| Node is Ready but bundled Deployment/DaemonSet is not present yet | This is an asynchronous bootstrap stage. Both modes wait for resource creation before checking rollout; inspect `resource-wait.log` if the creation deadline expires. |
 | Clock skew / certificate validity | Correct the host clock before isolation. Containers share the host clock; k3s does not supply offline NTP. Real sites need trusted local time service. |
 | An external probe succeeds | Treat it as a bug: stop, retain evidence, check attached networks, DNS/proxy configuration and host routing. Do not present the result as air-gapped. |
 

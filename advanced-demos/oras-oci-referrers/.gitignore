@@ -1,4 +1,5 @@
 .state/
+.demo.lock
 keys/
 *.key
 *.pem

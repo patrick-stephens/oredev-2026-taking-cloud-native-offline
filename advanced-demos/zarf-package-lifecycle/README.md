@@ -90,7 +90,7 @@ The two phases can also be run separately:
 ### CONNECTED: create the immutable transport artifact
 
 The connected script installs **Zarf v0.88.0**, the latest stable release
-resolved on the test date, and **k3d v5.9.0**. These versions are then fixed for
+resolved on 2026-10-16, and **k3d v5.9.0**. These versions are then fixed for
 rehearsals, not silently upgraded each run. It stages the matching init archive
 and verifies its release checksum.
 
@@ -122,6 +122,12 @@ A first PVC or sandbox can otherwise trigger an internet pull before Zarf's
 registry/agent exists. We pre-stage and CRI-pin both helper images against
 garbage collection, then restart the node while still CONNECTED
 to close old containerd HTTP keepalives before the offline counter measurement.
+Startup waits for API readiness and, after restart, evidence that CoreDNS's
+manifest was applied during this boot. If k3s omits its controller-owned
+`NodeHosts` key, a node annotation triggers reconciliation and the script waits
+for that key and healthy addons before isolation. Cached node/tool images are
+checked for `linux/amd64`; a wrong-platform local tag is pulled correctly while
+still CONNECTED.
 
 ### AIR-GAPPED: initialize from local bytes, then deploy
 
@@ -225,11 +231,11 @@ Evidence remains in ignored `artifacts/`:
 
 ## Tested with
 
-Test date: **2026-10-16**, native Linux amd64:
+Retest date: **2026-10-17**, native Linux amd64:
 
 | Item | Exact version |
 | --- | --- |
-| Docker engine | 29.9.0 |
+| Docker engine | 29.9.1 |
 | Zarf CLI and init package | v0.88.0 |
 | k3d / k3d-tools | v5.9.0 / 5.9.0 |
 | k3s node image | rancher/k3s:v1.35.5-k3s1 |
@@ -238,10 +244,16 @@ Test date: **2026-10-16**, native Linux amd64:
 | StorageClass helper | rancher/mirrored-library-busybox:1.37.0 |
 | Pod sandbox | rancher/mirrored-pause:3.6 |
 
-**Fresh final complete run: 159 seconds; idempotent repeat: 27 seconds**, with CLI/init/node artifacts pre-staged,
+**Fresh final complete run: 146 seconds; idempotent repeat: 24 seconds**, with CLI/init/node artifacts pre-staged,
 including connected package creation, cluster bootstrap, offline init and deploy.
 Initial CLI/init downloads add connection-dependent time; the init archive is
 about 392 MiB. Timings are measurements, not guarantees.
+
+The retest also passed recovery from a deliberately removed CoreDNS `NodeHosts`
+key (23 seconds for the full repeat), replacement of an ARM64 node-image tag
+with the required amd64 image while CONNECTED, and repeated cleanup. All
+successful lifecycle runs recorded zero forbidden IPv4/IPv6 egress attempts;
+the explicit node and pod internet probes failed as required.
 
 ## Troubleshooting and known limitations
 
@@ -257,6 +269,15 @@ about 392 MiB. Timings are measurements, not guarantees.
   initialization rather than running the injector again.
 - **PVC Pending / helper image pull:** the BusyBox helper must be pre-staged
   CONNECTED, not fetched during AIR-GAPPED.
+- **CoreDNS FailedMount / missing NodeHosts:** k3s can reapply its addon without
+  the node controller's data after restart. The connected script waits for the
+  current boot's apply event, triggers reconciliation and waits for recovery.
+  It does not patch DNS to reach external services.
+- **Node exits immediately / wrong cached architecture:** staging explicitly
+  checks `linux/amd64`, rather than trusting a locally present version tag.
+- **Injector ConfigMap timeout / slow SQL:** a heavily loaded shared disk caused
+  a k3s datastore timeout during retesting. Run on a quieter host and restart
+  from cleanup; do not disable fsync or weaken isolation to hide the failure.
 - **Dropped packets:** a hidden dependency is a failure. Inspect private
   init/deploy logs and firewall evidence. Do not loosen the allowlist.
   Lingering connected-bootstrap TCP FIN/RST packets also caused false lifecycle

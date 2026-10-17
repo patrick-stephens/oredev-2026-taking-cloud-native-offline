@@ -1,17 +1,25 @@
 contents:
   repositories:
-    - "@alpine /tmp/work/artifacts/offline-greeter/apk-repo/alpine"
-    - "@demo /tmp/work/artifacts/offline-greeter/apk-repo/melange"
+    - /tmp/work/artifacts/apko-melange-offline/apk-repo/melange
   keyring:
-    - /tmp/work/.state/offline-greeter/offline-demo.rsa.pub
+    - /tmp/work/.state/apko-melange-offline/offline-demo.rsa.pub
   packages:
-    - offline-greeter@demo
-    - busybox-binsh@alpine
-    - busybox@alpine
-    - musl@alpine
+    - offline-go-server
 
 archs:
   - amd64
 
 entrypoint:
-  command: /usr/bin/offline-greeter
+  command: /usr/bin/offline-go-server
+
+accounts:
+  groups:
+    - groupname: offline-go-server
+      gid: 65532
+  users:
+    - username: offline-go-server
+      uid: 65532
+      gid: 65532
+      shell: /sbin/nologin
+      homedir: /nonexistent
+  run-as: 65532

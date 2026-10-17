@@ -3,6 +3,49 @@
 # Installs local CLIs, stages init/node assets, packages chart/image/Git/files/SBOM.
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+
+wait_for_bootstrap() {
+    local attempt node_hosts restarted_at="${1:-}"
+    for ((attempt=0; attempt<60; attempt++)); do
+        if kube --request-timeout=2s get --raw=/readyz; then break; fi
+        sleep 1
+    done
+    [[ "$attempt" -lt 60 ]] || die "Kubernetes API did not become ready."
+    kube wait --for=condition=Ready node/"$NODE" --timeout=90s
+    kube -n kube-system wait --for=create deployment/coredns --timeout=60s
+    kube -n kube-system wait --for=create deployment/local-path-provisioner --timeout=60s
+    if [[ -n "$restarted_at" ]]; then
+        # Ready node/pod status can be left over from before the restart.
+        # Wait for this boot's addon apply before repairing controller-owned data.
+        for ((attempt=0; attempt<60; attempt++)); do
+            if kube -n kube-system get events \
+                --field-selector involvedObject.name=coredns,reason=AppliedManifest -o json |
+                jq -e --arg since "$restarted_at" \
+                    'any(.items[]; (.lastTimestamp // .eventTime // "") >= $since)' >/dev/null; then
+                break
+            fi
+            sleep 1
+        done
+        [[ "$attempt" -lt 60 ]] || die "CoreDNS manifest was not applied after the node restart."
+    fi
+    for ((attempt=0; attempt<18; attempt++)); do
+        node_hosts="$(kube -n kube-system get configmap coredns -o jsonpath='{.data.NodeHosts}')"
+        if [[ -z "$node_hosts" ]]; then
+            # k3s can reapply CoreDNS after restart without its controller-owned
+            # NodeHosts key. A node update asks that controller to rebuild it.
+            printf 'RECOVERING: asking k3s to reconcile the missing CoreDNS NodeHosts key.\n'
+            kube annotate node "$NODE" "offline-demo/reconcile-node-hosts=$(date +%s)-$attempt" --overwrite
+            if ! kube -n kube-system wait --for=jsonpath='{.data.NodeHosts}' \
+                configmap/coredns --timeout=5s; then
+                continue
+            fi
+        fi
+        if kube -n kube-system rollout status deployment/coredns --timeout=5s; then break; fi
+    done
+    [[ "$attempt" -lt 18 ]] || die "CoreDNS bootstrap failed after bounded reconciliation."
+    kube -n kube-system rollout status deployment/local-path-provisioner --timeout=90s
+}
+
 phase "PHASE 1: CONNECTED - stage tools, init package and workload package"
 bash "$DEMO_DIR/scripts/install-tools.sh"
 require_tools
@@ -30,7 +73,13 @@ jq '{name:"ghcr.io/stefanprodan/podinfo:6.15.0",packages:(.artifacts|length)}' \
     > "$ARTIFACTS/before-rendered.yaml"
 
 for image in "$NODE_IMAGE" ghcr.io/k3d-io/k3d-tools:5.9.0; do
-    if ! docker image inspect "$image" >/dev/null 2>&1; then timeout 180s docker pull "$image"; fi
+    if ! platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image" 2>/dev/null)"; then
+        platform=absent
+    fi
+    if [[ "$platform" != linux/amd64 ]]; then
+        printf 'STAGING: %s for linux/amd64 (cached platform: %s).\n' "$image" "${platform:-absent}"
+        timeout 180s docker pull --platform linux/amd64 "$image"
+    fi
 done
 if docker container inspect "$NODE" >/dev/null 2>&1; then
     assert_owned
@@ -46,11 +95,7 @@ else
     docker inspect --format '{{.Id}}' "$NODE" > "$STATE/node-id"
 fi
 "$TOOLS/k3d" kubeconfig get "$CLUSTER" > "$STATE/kubeconfig"
-kube wait --for=condition=Ready node/"$NODE" --timeout=90s
-kube -n kube-system wait --for=create deployment/coredns --timeout=60s
-kube -n kube-system wait --for=create deployment/local-path-provisioner --timeout=60s
-kube -n kube-system rollout status deployment/coredns --timeout=90s
-kube -n kube-system rollout status deployment/local-path-provisioner --timeout=90s
+wait_for_bootstrap
 kube get node "$NODE" -o json | jq -e \
     '.status.conditions[] | select(.type=="DiskPressure") | .status=="False"' >/dev/null ||
     die "Disk pressure blocks Zarf injection. Free sandbox disk before proceeding."
@@ -70,12 +115,7 @@ if ! kube get namespace zarf >/dev/null 2>&1; then
     # Close connected-bootstrap HTTP keepalives before declaring the air gap.
     # Cached infrastructure images survive; the application's image is absent.
     docker restart "$NODE" >/dev/null
-    for ((attempt=0; attempt<60; attempt++)); do
-        if kube get node "$NODE" >/dev/null 2>&1; then break; fi
-        sleep 1
-    done
-    kube wait --for=condition=Ready node/"$NODE" --timeout=90s
-    kube -n kube-system rollout status deployment/coredns --timeout=90s
-    kube -n kube-system rollout status deployment/local-path-provisioner --timeout=90s
+    restarted_at="$(docker inspect --format '{{.State.StartedAt}}' "$NODE")"
+    wait_for_bootstrap "$(date -u -d "$restarted_at" +%Y-%m-%dT%H:%M:%SZ)"
 fi
 printf 'CONNECTED COMPLETE: both application and init archives are staged locally.\n'

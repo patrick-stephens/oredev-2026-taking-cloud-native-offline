@@ -225,19 +225,29 @@ check_connected() {
 }
 
 check_isolation() {
-  local node address route
+  local node address route ipv6_route
   for node in cp1 worker1; do
     address="$(guest_ip "$node")"
     route="$(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
       -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
       "vagrant@$address" 'ip route show default')"
     [[ -z "$route" ]] || fail "$node still has a default route: $route"
+    ipv6_route="$(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
+      -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
+      "vagrant@$address" 'ip -6 route show default')"
+    [[ -z "$ipv6_route" ]] || fail "$node still has an IPv6 default route: $ipv6_route"
     if ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
       -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
       "vagrant@$address" 'timeout 5 bash -c "</dev/tcp/1.1.1.1/443"' >/dev/null 2>&1; then
       fail "$node reached an external IP during the air-gapped phase"
     fi
-    printf 'Expected isolation: %s has no default route and cannot open 1.1.1.1:443.\n' "$node"
+    if ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 \
+      -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" \
+      "vagrant@$address" 'timeout 5 bash -c "exec 3<>/dev/tcp/2606:4700:4700::1111/443"' \
+      >/dev/null 2>&1; then
+      fail "$node reached an external IPv6 address during the air-gapped phase"
+    fi
+    printf 'Expected isolation: %s has no IPv4/IPv6 default route and cannot reach public IPv4/IPv6 probes.\n' "$node"
   done
 }
 

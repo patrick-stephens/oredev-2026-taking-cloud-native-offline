@@ -14,7 +14,8 @@ and reconciled by Flux without restoring Internet access.
 1. **Set the boundary.** Explain that the host is the presenter/operator
    bridge. Gitea and the registry are on a Docker network marked `Internal:
    true`; the kind node has an internal-network leg and explicit `iptables`
-   OUTPUT/FORWARD blocks on its regular bridge leg. The host deliberately
+   IPv4/IPv6 OUTPUT/FORWARD blocks on its regular bridge leg. Only reply
+   traffic for inbound administration is exempt. The host deliberately
    remains online, so do not call this a physically disconnected laptop.
 2. **Connected staging.** Point to the exact local copies: four Flux
    controller images, Podinfo image, Podinfo chart, Gitea and the Kubernetes
@@ -23,15 +24,20 @@ and reconciled by Flux without restoring Internet access.
 3. **Bootstrap locally.** Show Gitea's admin user created by the CLI, Flux
    bootstrapping from SSH, and controllers pulling from the registry override.
    The resulting GitRepository and Kustomization are both Ready.
-4. **Prove the isolation.** The orchestrator's short-lived curl pod tries
-   `https://example.com`; a non-zero result is required. Then show the
-   Podinfo pod Running and its initial one-replica state.
+4. **Prove the isolation.** External HTTPS succeeds from the node during
+   CONNECTED staging. After the boundary, the node, Gitea, registry and a
+   Kubernetes pod must still reach the local registry but fail HTTPS to that
+   same external IPv4 destination without relying on DNS failure. The pod also
+   attempts IPv6 HTTPS, and both firewall families are checked. These checks
+   run again after the update.
 5. **Land the update.** The new commit is in the pre-staged bundle, but the
    importer fetches that bundle and cherry-picks the content onto the history
    Gitea now has after Flux's bootstrap commit. It pushes over local SSH only.
 6. **Observe reconciliation.** Flux sees a new Git revision. The Deployment
-   rolls to two replicas, and the UI message changes to “Updated through
-   offline bundle”.
+   rolls to two replicas, and the live HTTP message changes to “Updated through
+   offline bundle”. The script checks the exact imported Git revision and
+   Helm's observed generation, not just a possibly stale Ready condition.
+   Podinfo's logo is embedded rather than fetched from GitHub.
 
 ## Likely questions
 
@@ -58,7 +64,16 @@ and reconciled by Flux without restoring Internet access.
   to the isolated service network and blocks its external interface with
   `iptables` before AIR-GAPPED begins.
 - **Does the probe prove every external destination is blocked?** It proves
-  the pod cannot complete an HTTPS request through its normal egress path.
-  Docker's internal service network plus node-level egress blocks are the
-  isolation mechanisms; this is not a production firewall or exhaustive
+  clients in the node, service and pod namespaces cannot complete external
+  HTTPS requests while local registry requests work. IPv4 has a connected
+  positive control; IPv6 has firewall checks and a failed pod request, not a
+  positive control for native Internet connectivity. Docker's internal service
+  network plus node-level egress blocks are the mechanisms, not an exhaustive
   adversarial network test.
+
+## Rehearsal result
+
+The 2026-10-17 full rerun completed in **1m 34s** with cached Docker image
+layers. Fresh CLI downloads were tested separately. Allow extra time for cold
+image downloads and narration; the orchestrator pauses between phases unless
+`DEMO_AUTO_ADVANCE=1`.

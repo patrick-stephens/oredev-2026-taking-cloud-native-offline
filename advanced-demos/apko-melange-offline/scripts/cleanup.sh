@@ -36,6 +36,16 @@ if docker network inspect "$DOCKER_NETWORK" >/dev/null 2>&1; then
     fi
 fi
 
-rm -rf -- "$ROOT/.state/offline-greeter" "$ROOT/artifacts/offline-greeter"
+if ! rm -rf -- "$ROOT/.state/apko-melange-offline" "$ROOT/artifacts/apko-melange-offline"; then
+    echo 'Retrying generated-file cleanup through the local Alpine image.' >&2
+    docker run --rm --pull=never --network none \
+        --volume "$ROOT/.state:/demo-state" \
+        --volume "$ROOT/artifacts:/demo-artifacts" \
+        "$ALPINE_IMAGE" sh -ec '
+            rm -rf /demo-state/apko-melange-offline
+            rm -rf /demo-artifacts/apko-melange-offline
+        '
+    rm -rf -- "$ROOT/.state/apko-melange-offline" "$ROOT/artifacts/apko-melange-offline"
+fi
 printf 'Removed this demo cluster, zot container, generated signing key and artifacts.\n'
 printf 'Pinned tools, pulled Docker images, and unrelated generated files were left in place.\n'

@@ -16,3 +16,4 @@ spec:
       pullPolicy: IfNotPresent
     ui:
       message: "Offline baseline from Git"
+      logo: "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="

@@ -2,10 +2,11 @@
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 
+docker info >/dev/null
 if [[ -x "$TOOLS_DIR/kind" ]]; then
-    "$TOOLS_DIR/kind" delete cluster --name "$CLUSTER_NAME" >/dev/null 2>&1 || true
-else
-    docker rm -f "$CLUSTER_NODE" >/dev/null 2>&1 || true
+    "$TOOLS_DIR/kind" delete cluster --name "$CLUSTER_NAME" --kubeconfig "$STATE_DIR/kubeconfig"
+elif docker container inspect "$CLUSTER_NODE" >/dev/null 2>&1; then
+    docker rm -f "$CLUSTER_NODE" >/dev/null
 fi
 
 for container in "$GITEA_CONTAINER" "$REGISTRY_CONTAINER"; do

@@ -78,7 +78,7 @@ firewall, Docker daemon configuration and unrelated networks are not changed.
 
 ## Tested with
 
-End-to-end test date: **2026-10-16**, native Linux amd64, cgroup v2.
+Latest end-to-end test date: **2026-10-17**, native Linux amd64, cgroup v2.
 
 | Component | Exact tested version |
 |---|---|
@@ -97,11 +97,22 @@ End-to-end test date: **2026-10-16**, native Linux amd64, cgroup v2.
 | htpasswd tooling image | httpd:2.4.65-alpine |
 | Host Bash / curl / jq / ShellCheck | 5.2.21 / 8.5.0 / 1.7 / 0.9.0 |
 
-The completed rehearsal took **159 seconds (2m39s)** with container/tool
-downloads cached and `DEMO_PAUSE_SECONDS=0`. Cold downloads are additional and
+The latest complete rehearsal took **183 seconds (3m03s)** with container/tool
+downloads cached and `DEMO_PAUSE_SECONDS=0` (the previous run on 2026-10-16 took
+159 seconds). Cold downloads are additional and
 were not measured as a successful cold end-to-end run. Default narration sleeps
 add 12 seconds; actual bootstrap time varies. Each successful run records its
 own wall-clock runtime and versions in the generated evidence directory.
+
+Supplementary revalidation on 2026-10-17 also confirmed that unsigned
+`initContainers` and an unsigned `ephemeralContainers` update are denied.
+Scaling Ratify to zero rejected even a signed Pod; restoring it admitted a
+new signed, digest-pinned Pod without reopening internet access. The repeated
+outage/recovery check took 15 seconds, separate from the orchestrator runtime.
+Admission may remain unavailable briefly after Deployment readiness while
+Service endpoints/dataplane rules converge; the test allowed at most 60 seconds
+for a server-side dry-run admission to succeed. These supplementary checks are
+not extra phases in the normal presentation run.
 
 [config/versions.env](./config/versions.env) pins image/tool/chart versions,
 the kind node and application source digests, and chart/Notation archive
@@ -224,7 +235,7 @@ pod/httpbin-signed created
 pod/httpbin-signed condition met
 PASS: signed allowed and digest-pinned; unsigned denied; tampered denied.
 PASS: go-httpbin /get served locally; pod, verifier and node external access blocked.
-Runtime: 159 seconds
+Runtime: 183 seconds
 ```
 
 Actual denials captured in the tested run:
@@ -354,7 +365,10 @@ incorrect to claim all Sigstore verification inherently requires internet.
 - **Admission timeout:** check local service routing, provider TLS readiness
   and DNS. Removing the default route without the service-CIDR route breaks
   node-originated service DNAT. Denying IPv6 loopback breaks local API calls.
-  Do not fix these by restoring public egress.
+  After a Ratify restart, Deployment readiness alone does not prove admission
+  readiness: allow bounded time for Service endpoints/dataplane convergence and
+  confirm a signed server-side dry-run admission succeeds before resuming.
+  Do not fix these by restoring public egress or disabling fail-closed admission.
 - **Public egress test fails before policy:** resolve the connected firewall,
   DNS, proxy or upstream outage first. Negative tests without a positive control
   are not proof. Expected curl failures are checked by exit code; authentication,
@@ -375,7 +389,7 @@ incorrect to claim all Sigstore verification inherently requires internet.
   and separate push/read-only credentials in production. The signing cert is
   not the registry TLS certificate.
 - **Not exercised:** rootless/arm64/multi-node operation, real CA hierarchies,
-  online CRL/OCSP policies, verifier outage recovery, offline upgrades, and the
+  online CRL/OCSP policies, offline upgrades, and the
   stretch goals below. No Kyverno fallback was necessary.
 
 ## Cleanup

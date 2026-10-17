@@ -5,7 +5,7 @@ set -euo pipefail
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 purge=0
-if [[ "${1:-}" == "--purge" ]]; then
+if [[ $# == 1 && "$1" == "--purge" ]]; then
     purge=1
 elif [[ $# -gt 0 ]]; then
     printf 'Usage: %s [--purge]\n' "$0" >&2
@@ -26,12 +26,7 @@ if docker network inspect "$DEMO_NETWORK" >/dev/null 2>&1; then
 fi
 
 if [[ "$purge" == "1" ]]; then
-    if [[ -d "$DEMO_DIR/.state/registry-data" ]]; then
-        docker run --rm --user 0:0 \
-            -v "$DEMO_DIR/.state/registry-data:/registry-data" \
-            "$DEMO_RUNTIME_IMAGE" \
-            chown -R "$(id -u):$(id -g)" /registry-data
-    fi
+    repair_generated_ownership
     rm -rf -- "$DEMO_DIR/.bundle" "$DEMO_DIR/.work" "$DEMO_DIR/.state" \
         "$DEMO_DIR/.tools" "$DEMO_DIR/artifacts"
     printf "Removed this demo's generated bundle, registry state, staging area and archive.\n"

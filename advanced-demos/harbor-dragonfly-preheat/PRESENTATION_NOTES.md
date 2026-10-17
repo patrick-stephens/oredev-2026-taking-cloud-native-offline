@@ -17,7 +17,7 @@ in the measured run), not a tiny hello-world workload.
   another presenter. Allow 25 GiB free space before acquiring the toolchain.
 - Rehearse `./scripts/run-demo.sh` on the actual machine. First-run image
   acquisition can dominate time; the recorded complete cached-toolchain run
-  took 182 seconds. Leave time for questions rather than promising that runtime
+  took 218 seconds (2026-10-17). Leave time for questions rather than promising that runtime
   on a different disk.
 - Keep a previous run's private evidence elsewhere if needed. The orchestrator
   resets caches and destinations deliberately; do not "rehearse" by warming the
@@ -52,8 +52,9 @@ in the measured run), not a tiny hello-world workload.
 8. **Show proof, then speed.** Manifest and all config/layer hashes match for
    all ten copies. The seed's origin counter is unchanged; the gate served zero
    successful blob bytes; peers uploaded pieces to each other.
-9. **Do not sell a false speedup.** The final run was 7.52 s direct versus
-   6.19 s P2P; the earlier run was 11.96 s versus 12.86 s. The reliable benefit
+9. **Do not sell a false speedup.** The latest run was 10.91 s direct versus
+   1.03 s P2P, but P2P uses tmpfs and Harbor uses disk: these are not equivalent
+   storage paths. An earlier run was 11.96 s versus 12.86 s. The reliable benefit
    is origin offload and surviving source denial. Real fleet speedups require
    a real topology/bottleneck test.
 
@@ -75,7 +76,7 @@ Never unblock Harbor or silently allow a source fallback to rescue the demo.
 
 **Is the whole laptop offline?** No. The host downloads artifacts during
 CONNECTED; the workloads run on an internal Docker bridge. This is spectrum
-level 3, not physically disconnected bootstrap or a hostile-user boundary.
+catalogue levels 1–2, not physically disconnected bootstrap or a hostile-user boundary.
 
 **Does "no network" mean zero traffic?** No internet access. Local registry auth,
 manifests, control-plane RPCs and P2P pieces are necessary. Negative probes are
@@ -94,8 +95,9 @@ caches. Five skopeo clients join those namespaces and use each local proxy.
 The seed is separate and was populated only through Harbor preheat.
 
 **Does preheat guarantee availability later?** No. One rehearsal proved the
-opposite: disk pressure evicted successfully preheated layers before consumers
-arrived. Retention, sizing and monitoring are part of offline readiness.
+opposite: shared-disk pressure evicted successfully preheated layers before
+consumers arrived. Each demo peer now has its own bounded tmpfs cache; production
+needs dedicated, sized storage. Retention and monitoring are part of offline readiness.
 
 **Why old Harbor/Dragonfly?** The selected versions implement a known, tested
 legacy API contract. New Harbor uses authenticated Dragonfly job APIs.

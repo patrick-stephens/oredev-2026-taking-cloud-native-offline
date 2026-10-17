@@ -1,8 +1,8 @@
 # Offline GitOps with Flux, Gitea and Podinfo
 
-| Spectrum level | Demo app | Headline tooling | Status |
-|----------------|----------|------------------|--------|
-| 3 | podinfo | flux, gitea, git bundle | 🚧 WIP |
+| Spectrum level | Demo app | Headline tooling |
+|----------------|----------|------------------|
+| 3 | podinfo | flux, gitea, git bundle |
 
 Full GitOps loop (push → reconcile → deploy) inside the boundary
 
@@ -49,8 +49,10 @@ before AIR-GAPPED begins. kind cannot reliably boot on a Docker `--internal`
 network, so its node starts on kind's regular Docker bridge during CONNECTED
 staging. Before the phase boundary, the script attaches the node to the
 internal services network and installs `iptables` OUTPUT and FORWARD reject
-rules on the bridge-facing interface. Those rules prevent host and pod
-egress; the internal interface remains available to Gitea and the registry.
+rules on the bridge-facing interface for both IPv4 and IPv6. Only replies to
+inbound administration are exempt; connections opened during CONNECTED staging
+do not remain exempt. Those rules prevent node and pod egress; the internal
+interface remains available to Gitea and the registry.
 The internal service IPs are substituted into the generated kind
 configuration and Git repository, so Flux does not rely on Docker DNS being
 available to pods. kind's containerd is configured for HTTP access to the
@@ -59,11 +61,15 @@ registry.
 
 ## Tested with
 
-Tested on **2026-10-16**, Linux amd64, Docker Engine and CLI **29.9.1**:
+Tested on **2026-10-17**, Linux amd64, Docker Engine and CLI **29.9.1**:
 
 | Component | Pinned version |
 | --- | --- |
-| Flux CLI and controllers | 2.5.1 |
+| Flux CLI | 2.5.1 |
+| source-controller | 1.5.0 |
+| kustomize-controller | 1.5.1 |
+| helm-controller | 1.2.0 |
+| notification-controller | 1.5.0 |
 | kind | 0.27.0 |
 | Kubernetes node image | `kindest/node:v1.32.2` |
 | kubectl | 1.32.2 |
@@ -74,6 +80,7 @@ Tested on **2026-10-16**, Linux amd64, Docker Engine and CLI **29.9.1**:
 | Podinfo image | `ghcr.io/stefanprodan/podinfo:6.15.0` |
 | egress probe image | `curlimages/curl:8.12.1` |
 | Host helpers | Bash 5.2.21, Git 2.43.0, curl 8.5.0, jq 1.7, OpenSSH 9.6p1, GNU coreutils 9.4 |
+| ShellCheck (validation only) | 0.9.0 |
 
 `scripts/install-tools.sh` downloads pinned amd64 Flux, kind, kubectl and Helm
 binaries into the ignored `.tools/` directory and checks their reported
@@ -88,8 +95,8 @@ versions. Container images and the chart are pinned separately in
   Docker Hub, and `stefanprodan.github.io`.
 - Bash, Git, curl, `jq`, `ssh-keygen`, `ssh-keyscan`, `od`, `sha256sum`,
   `xargs`, and `clear` (interactive terminal only).
-- Ports `127.0.0.1:3000`, `127.0.0.1:2222`, `127.0.0.1:5001`, and
-  `127.0.0.1:16443` unused.
+- Ports `127.0.0.1:5001` and `127.0.0.1:16443` unused. Gitea uses its
+  internal bridge IP directly; it does not publish host ports.
 - Docker access without `sudo`; kind requires privileged containers.
 
 This demo owns fixed Docker object names (`offline-gitops-net`, its containers,
@@ -125,8 +132,10 @@ The script also initializes a local Git repository with the Podinfo
 commits a two-replica/message update, and creates `update.bundle`. Both bundle
 SHA-256 checksums are saved in `.state/bundle-checksums.txt`. Finally it
 creates the kind cluster while the host is still connected, attaches the node
-to the internal services network, and installs egress-blocking rules before
-clearing the screen for AIR-GAPPED.
+to the internal services network, and proves external HTTPS works from the
+node. It records that destination's IPv4 address for DNS-independent negative
+tests, then installs IPv4/IPv6 egress-blocking rules before clearing the screen
+for AIR-GAPPED.
 
 Flux's official [air-gapped installation guide](https://fluxcd.io/flux/installation/configuration/air-gapped/)
 documents mirroring controller images and passing `--registry` to bootstrap.
@@ -148,6 +157,8 @@ Gitea starts on `offline-gitops-net`, and the script:
    `gitea admin user create`, creates a private repository through Gitea's
    local API, and registers a generated Ed25519 public key.
 2. Pushes the baseline Git bundle into that repository over SSH.
+   Bundle SHA-256 checksums are verified before this initial import and again
+   before the update import.
 3. Uses the prepared kind node. Its egress-blocking rules prevent outbound
    traffic over kind's regular Docker bridge; its internal interface can reach
    only Gitea and the local registry. Flux and Podinfo images are already
@@ -155,9 +166,16 @@ Gitea starts on `offline-gitops-net`, and the script:
 4. Runs `flux bootstrap git` with the private key and the local registry
    override. Flux commits its controller manifests to Gitea and configures
    the cluster to reconcile `clusters/demo`.
-5. Waits for the Git source, Kustomization, Helm release and Podinfo
-   Deployment. It runs a short-lived curl pod and requires external HTTPS to
-   fail, then prints Flux source/Kustomization state and Podinfo readiness.
+5. Explicitly reconciles the HelmRelease after the Kustomization, waits for
+   its current generation and Deployment rollout, and checks exact Git
+   revisions, one updated/ready/available replica, and the live Podinfo HTTP
+   message. An embedded logo replaces Podinfo's default GitHub-hosted logo.
+6. Checks Docker network membership and IPv4/IPv6 firewall rules. Fresh
+   clients sharing the node, Gitea and registry network namespaces must reach
+   the local registry but fail external HTTPS against the previously reachable
+   IPv4 address. A Kubernetes probe pod must also reach the local registry and
+   fail external IPv4 and IPv6 HTTPS. Missing tools, image failures, DNS errors
+   or HTTP/TLS errors are not accepted as evidence of isolation.
 
 The OCI chart source uses a Flux `OCIRepository` with `insecure: true` because
 the local registry is HTTP. `HelmRelease.chartRef` points at that local chart
@@ -170,13 +188,19 @@ the served OCIRepository API version in the pinned Flux 2.5.1 CRDs.
 ### Phase 3 — AIR-GAPPED UPDATE ROUND TRIP
 
 The update commit and its bundle were created on the connected host, then
-staged before isolation. The script prints the bundle hashes, fetches the
-update commit from `update.bundle`, verifies the bundle SHA-256 checksum, and
-cherry-picks it onto the post-bootstrap
-Gitea history, and pushes it over the internal SSH path. Cherry-picking is
+staged before isolation. The script verifies the bundle SHA-256 checksums,
+fetches the update commit from `update.bundle`, cherry-picks it onto the
+post-bootstrap Gitea history, and pushes it over the internal SSH path. Cherry-picking is
 needed because Flux bootstrap added its own commit to Gitea after the baseline
 bundle was imported. Flux reconciles that new commit; the Deployment changes
-from one to two replicas.
+from one to two replicas. The script checks the exact imported Git revision,
+Helm's current generation, two ready replicas, and the live message
+`Updated through offline bundle`, then repeats all isolation checks.
+
+Checksums detect transport corruption, not malicious replacement of the bundle
+and its checksum file together. They are not signatures. `git bundle verify`
+checks bundle prerequisites/header metadata; SHA-256 verification is the byte
+integrity check before import.
 
 ## Expected evidence
 
@@ -184,7 +208,7 @@ Versions and hashes are stable; IPs, timestamps, pod names and digests vary.
 Near the end, expect output equivalent to:
 
 ```text
-PASS: the Kubernetes pod cannot reach external HTTPS.
+PASS: the Kubernetes pod reaches the registry; external IPv4/IPv6 HTTPS is blocked.
 NAME          REVISION              SUSPENDED  READY  MESSAGE
 flux-system   main@sha1:<revision>  False      True   stored artifact ...
 NAME          REVISION              SUSPENDED  READY  MESSAGE
@@ -192,7 +216,8 @@ flux-system   main@sha1:<revision>  False      True   Applied revision ...
 podinfo-...   1/1       Running
 podinfo-...   1/1       Running
 desired=2 ready=2
-COMPLETE: Flux reconciled the Gitea update with no external network route.
+PASS: revision <commit>, 2 ready replicas, live message "Updated through offline bundle" and embedded logo.
+COMPLETE: Flux reconciled the Gitea update with external egress blocked.
 Total runtime: <minutes>m <seconds>s
 ```
 
@@ -200,6 +225,33 @@ The initial evidence block shows `desired=1 ready=1`. If Flux reports
 `Ready=True` but the new revision has not appeared yet, the orchestrator's
 explicit `flux reconcile` and rollout waits have not completed and the run
 does not claim success.
+
+## Validation results
+
+On 2026-10-17, the full demo was rerun from recreated cluster, Gitea and registry
+volumes, including a fresh download of all four CLI tools. The final successful
+orchestrator runtime was **1m 34s** with Docker image layers cached; separate
+fresh CLI downloads and cleanup are not included in that duration.
+
+Verified baseline `1/1`, update `2/2`, the exact reconciled Git commits, both live
+HTTP messages, all four controller image references pointing to the internal
+registry, bundle checksums, and isolation before and after the update.
+Negative tests rejected an incorrect expected message, an incorrect Git
+revision, missing firewall rules, a corrupt bundle checksum and a truncated
+bundle import. The IPv4 destination was reachable before isolation. IPv6
+firewall rules and failed IPv6 pod requests were checked, but native IPv6
+Internet connectivity was not established as a connected positive control.
+
+Static checks:
+
+```bash
+shellcheck -x -P scripts scripts/*.sh
+for script in scripts/*.sh; do bash -n "$script"; done
+```
+
+Cleanup was run twice and checked for absence of the demo's containers, network,
+volumes and `.state/` credentials. The Docker-wide shared `kind` network and
+cached images/tools are deliberately retained.
 
 ## Troubleshooting
 
@@ -211,8 +263,9 @@ does not claim success.
   controller or workload pull should go upstream.
 - **Flux `ImagePullBackOff`:** inspect
   `kubectl -n flux-system describe pod <pod>` and confirm that all four image
-  tags appear under `docker exec offline-gitops-registry ...` / the local
-  registry API. `config/kind.yaml` sets containerd's registry mirror to HTTP.
+  tags appear in the local registry API, for example
+  `curl --noproxy '*' http://<registry-ip>:5000/v2/fluxcd/source-controller/tags/list`.
+  `config/kind.yaml` sets containerd's registry mirror to HTTP.
 - **Gitea SSH authentication:** inspect
   `docker logs offline-gitops-gitea`, `.state/home/.ssh/known_hosts`, and the
   generated public key's Gitea account registration. The private key remains
@@ -223,11 +276,23 @@ does not claim success.
   `6.15.0`, and the OCI source must use the internal registry's current IP.
 - **Egress probe succeeds:** stop. The run is not a successful offline demo.
   Verify `offline-gitops-net` is marked `Internal: true` and inspect the
-  `OUTPUT`/`FORWARD` rules in the kind node with
-  `docker exec offline-gitops-control-plane iptables -S`.
+  IPv4 and IPv6 `OUTPUT`/`FORWARD` rules in the kind node with
+  `docker exec offline-gitops-control-plane iptables -S` and
+  `docker exec offline-gitops-control-plane ip6tables -S`.
 - **Failure midway:** state and logs are intentionally retained. Inspect with
   `docker ps -a`, `docker logs`, and the pinned tools in `.tools/`; then run
   `./scripts/cleanup.sh` before retrying.
+
+For manual inspection from the demo directory after a successful run:
+
+```bash
+export PATH="$PWD/.tools:$PATH"
+export KUBECONFIG="$PWD/.state/kubeconfig"
+flux get sources git -A
+flux get kustomizations -A
+kubectl -n podinfo get helmrelease,ocirepository,pods
+kubectl get --raw /api/v1/namespaces/podinfo/services/http:podinfo:9898/proxy/
+```
 
 ## Cleanup
 
@@ -245,7 +310,8 @@ pinned binaries in `.tools/` are retained for faster reruns.
   retains Internet access and can communicate with the internal network
   through its bridge route. The kind node retains a normal Docker network
   attachment, but its external-interface OUTPUT and FORWARD paths are
-  firewall-blocked before AIR-GAPPED begins.
+  firewall-blocked for IPv4 and IPv6 before AIR-GAPPED begins. The operator
+  host can change those rules or add Docker attachments; it is trusted.
 - A registry IP is inserted into this run's Git commits and cluster config.
   Recreating the Docker network requires recreating both bundles and
   bootstrapping again; the script does this on every run.
@@ -261,9 +327,8 @@ pinned binaries in `.tools/` are retained for faster reruns.
 Internet is required on the **host** during CONNECTED staging to fetch tools,
 the pinned Gitea/registry/kind/Podinfo/probe images, Flux controller images,
 and the Podinfo chart. During AIR-GAPPED phases the containers and Kubernetes
-pods cannot egress to external destinations, checked with a real pod-level
-HTTPS probe. The
-host remains the local operator/transfer bridge and uses SSH to import the
+pods cannot egress to external destinations, checked with namespace-level and
+pod-level HTTPS probes. The host remains the local operator/transfer bridge and uses SSH to import the
 bundle into Gitea; that local access is required and is not Internet access.
 Running this on a physically offline host therefore requires preloading the
 pinned binaries, images, chart, and bundle outside this orchestrator.
@@ -277,3 +342,6 @@ and Podinfo images by digest, and use a registry with TLS and authentication.
 For an operational deployment, compare this Git-bundle handoff with
 content-addressed OCI Git artifacts and a controlled transfer gateway; keep
 the Git revision and artifact digest linked in the release record.
+An optional ArgoCD variant would compare the same bundle-import boundary with
+Application reconciliation and local Helm chart sourcing; it is not implemented
+in this Flux demo.

@@ -13,7 +13,7 @@ unrelated applications selected to produce different policy results.
 ## Preparation
 
 - Run [the orchestrator](./scripts/run-demo.sh) once on the presentation machine.
-  Rehearse with `DEMO_PAUSE_SECONDS=0`; the recorded successful run took 159s
+  Rehearse with `DEMO_PAUSE_SECONDS=0`; the latest successful run took 183s
   with downloads cached, excluding cold downloads and narration pauses.
 - Use native Linux amd64 with privileged rootful Docker and cgroup v2.
   Reserve the documented subnets and names. Do not use a production cluster.
@@ -132,9 +132,13 @@ route removal isolate it without changing the Docker host. This is explicitly
 documented, not presented as an all-internal Docker topology.
 
 **"What fails when Ratify is unavailable?"**  
-The demo namespace has fail-closed admission. Availability is deliberately a
-trade-off; outage/recovery is not part of this tested run. The policy does not
-cover every namespace or harden privileged workloads.
+The demo namespace has fail-closed admission. A supplementary test on 2026-10-17
+scaled Ratify to zero, confirmed even a signed Pod was denied, restored Ratify
+and admitted a new signed Pod offline. Allow bounded time after Deployment
+readiness for Service dataplane convergence; a signed server-side dry run checks
+actual admission readiness. Availability is deliberately a trade-off, and this
+outage exercise is not an extra phase in the normal presentation run. The
+policy does not cover every namespace or harden privileged workloads.
 
 **"Can the host or a malicious privileged workload bypass this?"**  
 Yes. The host is trusted, and production needs RBAC and privilege/network

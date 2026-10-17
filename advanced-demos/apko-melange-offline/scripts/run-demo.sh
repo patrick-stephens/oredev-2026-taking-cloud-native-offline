@@ -5,8 +5,8 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../config/versions.env
 source "$ROOT/config/versions.env"
 TOOLS="$ROOT/.tools"
-ARTIFACTS="$ROOT/artifacts/offline-greeter"
-STATE="$ROOT/.state/offline-greeter"
+ARTIFACTS="$ROOT/artifacts/apko-melange-offline"
+STATE="$ROOT/.state/apko-melange-offline"
 SANDBOX_ROOT=/tmp/work
 SLEEP_SECONDS="${DEMO_SLEEP_SECONDS:-2}"
 START_SECONDS=$SECONDS
@@ -32,15 +32,21 @@ clear_between_phases() {
     fi
 }
 
-isolated() {
+isolated_from() {
+    local working_dir="$1"
+    shift
     bwrap --die-with-parent --unshare-net \
         --ro-bind / / \
         --dev-bind /dev /dev \
         --proc /proc \
         --tmpfs /tmp \
         --bind "$ROOT" "$SANDBOX_ROOT" \
-        --chdir "$SANDBOX_ROOT" \
+        --chdir "$working_dir" \
         "$@"
+}
+
+isolated() {
+    isolated_from "$SANDBOX_ROOT" "$@"
 }
 
 airgap_check() {
@@ -55,6 +61,16 @@ airgap_check() {
     ' | tee "$ARTIFACTS/airgap-network-proof.txt"
 }
 
+record_footprint() {
+    local reference="$1"
+    local name="$2"
+    local bytes
+    bytes="$(docker image inspect "$reference" --format '{{.Size}}')"
+    printf '%s_image=%s\n%s_bytes=%s\n' "$name" "$reference" "$name" "$bytes"
+    awk -v name="$name" -v size="$bytes" \
+        'BEGIN { printf "%s_mib=%.2f\n", name, size / 1048576 }'
+}
+
 keyring_args=()
 append_alpine_keys() {
     local key
@@ -65,52 +81,71 @@ append_alpine_keys() {
         found=true
     done
     if [[ "$found" != true ]]; then
-        echo 'No Alpine APK trust keys found in artifacts/offline-greeter/apk-repo/keys/alpine.' >&2
+        echo 'No Alpine APK trust keys found in artifacts/apko-melange-offline/apk-repo/keys/alpine.' >&2
         return 1
     fi
 }
 
 connected_phase() {
     echo '=== PHASE 1: CONNECTED ==='
-    echo 'Fetching checksum-pinned tools, runtime images, and the signed Alpine APK closure.'
-    mkdir -p "$ARTIFACTS" "$STATE"
+    echo 'Fetching checksum-pinned tools, runtime images, and the signed Alpine Go APK closure.'
+    mkdir -p "$STATE"
+    rm -rf -- "$ARTIFACTS"
+    mkdir -p "$ARTIFACTS"
     "$ROOT/scripts/install-tools.sh" | tee "$ARTIFACTS/tools-version.txt"
     docker pull "$ALPINE_IMAGE"
+    docker pull "$NGINX_IMAGE"
     docker pull "$PAUSE_IMAGE"
     docker pull "$ZOT_IMAGE"
     docker pull "$K3S_IMAGE"
-
-    docker run --rm --volume "$ROOT/artifacts:/artifacts" "$ALPINE_IMAGE" \
-        sh -ec 'rm -rf /artifacts/offline-greeter'
-    mkdir -p "$ARTIFACTS"
-    mkdir -p "$ARTIFACTS/apk-repo/alpine/x86_64" \
+    docker pull "$K3D_TOOLS_IMAGE"
+    docker pull "$K3D_PROXY_IMAGE"
+    mkdir -p "$ARTIFACTS/apk-repo/downloaded" \
+        "$ARTIFACTS/apk-repo/main/x86_64" \
+        "$ARTIFACTS/apk-repo/community/x86_64" \
         "$ARTIFACTS/apk-repo/keys/alpine"
     docker run --rm \
-        --env LOCAL_UID="$(id -u)" \
-        --env LOCAL_GID="$(id -g)" \
         --env ALPINE_REPOSITORY="$ALPINE_REPOSITORY" \
+        --env ALPINE_BASE="${ALPINE_REPOSITORY%/main}" \
         --volume "$ARTIFACTS/apk-repo:/repo" \
         "$ALPINE_IMAGE" sh -ec '
-            printf "%s\n" "$ALPINE_REPOSITORY" > /tmp/repositories
+            printf "%s\n" \
+                "$ALPINE_REPOSITORY" \
+                "$ALPINE_BASE/community" \
+                > /tmp/repositories
             apk update --repositories-file /tmp/repositories
             apk fetch --repositories-file /tmp/repositories --recursive \
-                --output /repo/alpine/x86_64 busybox-binsh
-            set -- /var/cache/apk/APKINDEX.*.tar.gz
-            test "$#" -eq 1
-            cp "$1" /repo/alpine/x86_64/APKINDEX.tar.gz
+                --output /repo/downloaded go busybox-binsh busybox musl
+            for repository in main community; do
+                mkdir -p "/repo/$repository/x86_64"
+                wget -q -O "/repo/$repository/x86_64/APKINDEX.tar.gz" \
+                    "$ALPINE_BASE/$repository/x86_64/APKINDEX.tar.gz"
+                cp -a /repo/downloaded/. "/repo/$repository/x86_64/"
+            done
             cp -a /etc/apk/keys/. /repo/keys/alpine/
-            chown -R "$LOCAL_UID:$LOCAL_GID" /repo
+            chmod -R a+rwX /repo
+            for package in /repo/downloaded/*.apk; do
+                basename "$package"
+            done | sort > /repo/apk-package-closure.txt
+            for package in /repo/downloaded/go-*.apk; do
+                basename "$package"
+            done > /repo/go-package-version.txt
         '
 
+    [[ -s "$ARTIFACTS/apk-repo/go-package-version.txt" ]] || {
+        echo 'The requested Go compiler package was not staged.' >&2
+        exit 1
+    }
+    record_footprint "$NGINX_IMAGE" nginx > "$ARTIFACTS/footprint.txt"
     if [[ ! -f "$STATE/offline-demo.rsa" ]]; then
         "$TOOLS/melange" keygen "$STATE/offline-demo.rsa"
     fi
     chmod 0600 "$STATE/offline-demo.rsa"
-    printf 'Staged Alpine APKs: %s\n' \
-        "$(find "$ARTIFACTS/apk-repo/alpine" -maxdepth 2 -name '*.apk' -type f | wc -l)"
-    printf 'Alpine trust keys: %s\n' \
-        "$(find "$ARTIFACTS/apk-repo/keys/alpine" -maxdepth 1 -name '*.rsa.pub' -type f | wc -l)"
-    echo 'The generated signing key is local, ignored by Git, and not part of the package repository.'
+    printf 'APK dependency closure (%s packages):\n' \
+        "$(wc -l < "$ARTIFACTS/apk-repo/apk-package-closure.txt")"
+    cat "$ARTIFACTS/apk-repo/go-package-version.txt"
+    cat "$ARTIFACTS/apk-repo/apk-package-closure.txt"
+    echo 'Connected acquisition complete; the ephemeral signing key remains local.'
 }
 
 create_internal_network() {
@@ -126,12 +161,15 @@ create_internal_network() {
             "$DOCKER_NETWORK" >/dev/null
     fi
 
-    if docker run --rm --network "$DOCKER_NETWORK" "$ALPINE_IMAGE" \
-        sh -ec 'wget -T 3 -qO- http://1.1.1.1/'; then
+    local gateway
+    gateway="$(docker network inspect "$DOCKER_NETWORK" \
+        --format '{{(index .IPAM.Config 0).Gateway}}')"
+    if docker run --rm --cap-add NET_ADMIN --network "$DOCKER_NETWORK" "$ALPINE_IMAGE" \
+        sh -ec 'ip route add default via "$1"; wget -T 3 -qO- http://1.1.1.1/' _ "$gateway"; then
         echo 'ERROR: Docker internal-network container reached an external endpoint.' >&2
         exit 1
     else
-        echo 'Expected: external request from the Docker internal network failed.' |
+        echo 'Expected: external request failed even with a default route to the internal bridge.' |
             tee "$ARTIFACTS/docker-network-proof.txt"
     fi
     [[ "$(docker network inspect "$DOCKER_NETWORK" --format '{{.Internal}}')" == true ]]
@@ -142,15 +180,16 @@ build_package_and_image() {
         "$STATE/apk-cache" "$STATE/melange-work" "$STATE/apko-cache"
     append_alpine_keys
 
-    echo 'Building and signing the APK in a private network namespace.'
+    echo 'Building and signing the Go APK in a private network namespace.'
     isolated "$SANDBOX_ROOT/.tools/melange" build "$SANDBOX_ROOT/config/melange.yaml" \
         --arch x86_64 \
         --runner bubblewrap \
-        --signing-key "$SANDBOX_ROOT/.state/offline-greeter/offline-demo.rsa" \
-        --out-dir "$SANDBOX_ROOT/artifacts/offline-greeter/apk-repo/melange" \
-        --cache-dir "$SANDBOX_ROOT/.state/offline-greeter/melange-cache" \
-        --apk-cache-dir "$SANDBOX_ROOT/.state/offline-greeter/apk-cache" \
-        --workspace-dir "$SANDBOX_ROOT/.state/offline-greeter/melange-work" \
+        --signing-key "$SANDBOX_ROOT/.state/apko-melange-offline/offline-demo.rsa" \
+        --out-dir "$SANDBOX_ROOT/artifacts/apko-melange-offline/apk-repo/melange" \
+        --source-dir "$SANDBOX_ROOT/apps/hello" \
+        --cache-dir "$SANDBOX_ROOT/.state/apko-melange-offline/melange-cache" \
+        --apk-cache-dir "$SANDBOX_ROOT/.state/apko-melange-offline/apk-cache" \
+        --workspace-dir "$SANDBOX_ROOT/.state/apko-melange-offline/melange-work" \
         "${keyring_args[@]}"
 
     test -s "$ARTIFACTS/apk-repo/melange/x86_64/APKINDEX.tar.gz" || {
@@ -158,20 +197,26 @@ build_package_and_image() {
         exit 1
     }
     find "$ARTIFACTS/apk-repo/melange/x86_64" -maxdepth 1 \
-        -name 'offline-greeter-*.apk' -print -quit | grep -q . || {
-        echo 'Melange did not produce the offline greeter APK.' >&2
+        -name 'offline-go-server-*.apk' -print -quit | grep -q . || {
+        echo 'Melange did not produce the offline Go server APK.' >&2
         exit 1
     }
 
-    echo 'Assembling the image with apko --offline.'
-    isolated "$SANDBOX_ROOT/.tools/apko" build --offline \
+    echo 'Assembling the minimal runtime image with apko --offline.'
+    mkdir -p "$STATE/apko-work"
+    isolated_from "$SANDBOX_ROOT/.state/apko-melange-offline/apko-work" \
+        "$SANDBOX_ROOT/.tools/apko" build --offline \
         --arch amd64 \
-        --cache-dir "$SANDBOX_ROOT/.state/offline-greeter/apko-cache" \
+        --cache-dir "$SANDBOX_ROOT/.state/apko-melange-offline/apko-cache" \
         "${keyring_args[@]}" \
         "$SANDBOX_ROOT/config/apko.yaml" \
-        "$IMAGE_TAG" \
-        "$SANDBOX_ROOT/artifacts/offline-greeter/offline-image.tar"
+        "$APKO_TAG" \
+        "$SANDBOX_ROOT/artifacts/apko-melange-offline/offline-image.tar"
     docker load --input "$ARTIFACTS/offline-image.tar"
+    {
+        record_footprint "$NGINX_IMAGE" nginx
+        record_footprint "$IMAGE_TAG" apko
+    } | tee "$ARTIFACTS/footprint.txt"
 }
 
 start_zot() {
@@ -183,21 +228,28 @@ start_zot() {
         fi
         docker rm --force "$ZOT_CONTAINER" >/dev/null
     fi
+    mkdir -p "$STATE/zot"
     docker run --detach --name "$ZOT_CONTAINER" \
         --label demo=apko-melange-offline \
         --network "$DOCKER_NETWORK" --network-alias zot \
+        --volume "$STATE/zot:/var/lib/zot" \
         --volume "$ROOT/config/zot-config.json:/etc/zot/config.json:ro" \
         "$ZOT_IMAGE" serve /etc/zot/config.json >/dev/null
 
+    ZOT_IP="$(docker inspect "$ZOT_CONTAINER" \
+        --format '{{(index .NetworkSettings.Networks "apko-melange-offline").IPAddress}}')"
+    [[ -n "$ZOT_IP" ]] || {
+        echo 'Could not determine zot address on the internal Docker network.' >&2
+        exit 1
+    }
     for _ in $(seq 1 30); do
-        if docker run --rm --network "$DOCKER_NETWORK" "$ALPINE_IMAGE" \
-            wget -T 2 -qO- http://zot:5000/v2/ >/dev/null; then
+        if curl --fail --silent "http://$ZOT_IP:5000/v2/" >/dev/null; then
             return
         fi
         sleep 1
     done
     docker logs "$ZOT_CONTAINER" >&2
-    echo 'zot did not become ready on the internal Docker network.' >&2
+    echo "zot did not become ready at its internal address $ZOT_IP:5000." >&2
     exit 1
 }
 
@@ -223,9 +275,9 @@ start_cluster() {
     chmod 0755 "$STATE/k3d-default-route.sh"
     local extra_k3s_args=()
     if [[ "${DEMO_RELAX_DISK_EVICTION:-false}" == true ]]; then
-        echo 'WARNING: setting 1% kubelet disk-pressure thresholds for this disposable demo cluster.'
+        echo 'WARNING: setting 0.1% kubelet disk-pressure thresholds for this disposable demo cluster.'
         extra_k3s_args+=(--k3s-arg \
-            '--kubelet-arg=eviction-hard=nodefs.available<1%,imagefs.available<1%@server:*')
+            '--kubelet-arg=eviction-hard=nodefs.available<0.1%,imagefs.available<0.1%@server:*')
     fi
     "$TOOLS/k3d" cluster create "$CLUSTER_NAME" \
         --image "$K3S_IMAGE" \
@@ -259,45 +311,65 @@ start_cluster() {
 
     kubectl=("$TOOLS/kubectl" --kubeconfig "$STATE/kubeconfig")
     "${kubectl[@]}" wait --for=condition=Ready node --all --timeout=120s
+    if docker exec "$node" wget -T 3 -qO- http://1.1.1.1/ >/dev/null; then
+        echo 'ERROR: the k3d server reached an external endpoint.' >&2
+        exit 1
+    else
+        echo 'Expected: k3d server has a default route but external egress is blocked.' |
+            tee -a "$ARTIFACTS/docker-network-proof.txt"
+    fi
 }
 
 push_to_zot() {
     local node="k3d-${CLUSTER_NAME}-server-0"
+    local registry_image="zot:5000/${IMAGE_TAG#*/}"
     local ctr=(ctr --address /run/k3s/containerd/containerd.sock --namespace k8s.io)
     docker save "$IMAGE_TAG" --output "$ARTIFACTS/local-image.tar"
     docker cp "$ARTIFACTS/local-image.tar" "$node:/tmp/local-image.tar"
     docker exec "$node" "${ctr[@]}" images import /tmp/local-image.tar
-    docker exec "$node" "${ctr[@]}" images tag \
-        "docker.io/library/$IMAGE_TAG" "$REGISTRY_IMAGE"
-    docker exec "$node" "${ctr[@]}" images push --plain-http "$REGISTRY_IMAGE"
-    docker run --rm --network "$DOCKER_NETWORK" "$ALPINE_IMAGE" sh -ec \
-        'wget -qO- http://zot:5000/v2/offline/offline-greeter/tags/list | grep -q "\"demo\""'
-    docker exec "$node" "${ctr[@]}" images rm \
-        "docker.io/library/$IMAGE_TAG" "$REGISTRY_IMAGE"
+    docker exec "$node" "${ctr[@]}" images tag "$IMAGE_TAG" "$registry_image"
+    docker exec "$node" "${ctr[@]}" images push --plain-http "$registry_image"
+    curl --fail --silent \
+        "http://$ZOT_IP:5000/v2/offline/offline-go-server/tags/list" |
+        grep -Fq "\"${IMAGE_TAG##*:}\"" || {
+            echo 'The image tag is missing from zot after the internal push.' >&2
+            exit 1
+        }
+    docker exec "$node" "${ctr[@]}" images rm "$IMAGE_TAG" "$registry_image"
     docker exec "$node" rm -f /tmp/local-image.tar
 }
 
 preload_pause_image() {
-    local node="k3d-${CLUSTER_NAME}-server-0"
-    local ctr=(ctr --address /run/k3s/containerd/containerd.sock --namespace k8s.io)
-    docker tag "$PAUSE_IMAGE" "$PAUSE_IMAGE_TAG"
-    docker save "$PAUSE_IMAGE_TAG" --output "$ARTIFACTS/pause-image.tar"
-    docker cp "$ARTIFACTS/pause-image.tar" "$node:/tmp/pause-image.tar"
-    docker exec "$node" "${ctr[@]}" images import /tmp/pause-image.tar
-    docker exec "$node" "${ctr[@]}" images list |
-        grep -F 'docker.io/rancher/mirrored-pause:3.6' >/dev/null
-    docker exec "$node" rm -f /tmp/pause-image.tar
+    "$TOOLS/k3d" image import "$PAUSE_IMAGE_TAG" --cluster "$CLUSTER_NAME"
 }
 
 deploy_and_verify() {
-    kubectl=("$TOOLS/kubectl" --kubeconfig "$STATE/kubeconfig")
-    "${kubectl[@]}" run offline-greeter \
-        --image="$REGISTRY_IMAGE" --image-pull-policy=Always --restart=Never
-    "${kubectl[@]}" wait --for=jsonpath='{.status.phase}'=Succeeded \
-        pod/offline-greeter --timeout=120s
-    "${kubectl[@]}" logs pod/offline-greeter | tee "$ARTIFACTS/pod-output.txt"
-    grep -Fx 'hello from an APK built and assembled with no network' \
-        "$ARTIFACTS/pod-output.txt"
+    "${kubectl[@]}" create namespace offline-demo --dry-run=client -o yaml |
+        "${kubectl[@]}" apply -f -
+    "${kubectl[@]}" apply -f "$ROOT/manifests/hello.yaml"
+    "${kubectl[@]}" -n offline-demo rollout status \
+        deployment/offline-go-server --timeout=120s
+
+    "${kubectl[@]}" -n offline-demo port-forward \
+        deployment/offline-go-server 18080:8080 >"$ARTIFACTS/port-forward.log" 2>&1 &
+    PORT_FORWARD_PID=$!
+    trap 'if [[ -n "$PORT_FORWARD_PID" ]]; then kill "$PORT_FORWARD_PID" 2>/dev/null || true; fi' EXIT
+    local response=''
+    for _ in $(seq 1 30); do
+        if response="$(curl --fail --silent http://127.0.0.1:18080/ 2>/dev/null)"; then
+            break
+        fi
+        sleep 1
+    done
+    [[ "$response" == *'"message":"hello from a static Go binary in an apko image"'* ]] || {
+        echo "Unexpected Go server response: ${response:-<no response>}" >&2
+        cat "$ARTIFACTS/port-forward.log" >&2
+        exit 1
+    }
+    printf '%s\n' "$response" | tee "$ARTIFACTS/pod-output.txt"
+    kill "$PORT_FORWARD_PID" 2>/dev/null || true
+    PORT_FORWARD_PID=''
+    trap - EXIT
 }
 
 connected_phase
@@ -305,7 +377,7 @@ pause_for_narration
 
 clear_between_phases
 echo '=== PHASE 2: AIR-GAPPED ==='
-echo 'Internet access is removed from the build namespace and Docker internal network.'
+echo 'Melange and apko have no network interface; zot and k3d use an internal-only Docker network.'
 airgap_check
 create_internal_network
 build_package_and_image
@@ -315,7 +387,9 @@ push_to_zot
 preload_pause_image
 deploy_and_verify
 
-printf 'Docker network %s: Internal=%s\n' "$DOCKER_NETWORK" \
-    "$(docker network inspect "$DOCKER_NETWORK" --format '{{.Internal}}')"
-printf '=== COMPLETE: signed APK -> apko image -> zot -> offline k3d pod (%s seconds) ===\n' \
+{
+    record_footprint "$NGINX_IMAGE" nginx
+    record_footprint "$IMAGE_TAG" apko
+} | tee "$ARTIFACTS/footprint.txt"
+printf '=== COMPLETE: signed Go APK -> apko image -> local zot -> offline k3d HTTP check (%s seconds) ===\n' \
     "$((SECONDS - START_SECONDS))"

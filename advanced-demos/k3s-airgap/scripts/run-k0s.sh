@@ -83,8 +83,11 @@ until k get nodes -o json > "$STATE/nodes.json" 2>"$STATE/api-wait.log" &&
 done
 k wait --for=condition=Ready node --all --timeout=180s
 k get nodes -o wide
+wait_for_resource kube-system deployment/coredns
 k -n kube-system rollout status deployment/coredns --timeout=180s
+wait_for_resource kube-system daemonset/kube-router
 k -n kube-system rollout status daemonset/kube-router --timeout=180s
+wait_for_resource kube-system daemonset/kube-proxy
 k -n kube-system rollout status daemonset/kube-proxy --timeout=180s
 docker exec "$NODE" k0s version
 images | tee "$STATE/images.txt"

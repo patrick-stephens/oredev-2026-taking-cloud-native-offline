@@ -19,7 +19,7 @@ container-in-container substitute for node operating systems.
 assembles and checksums the selected Kubean localrelease files, pulls the
 official Apache httpd 2.4 image, and boots two KVM/libvirt VMs. The air-gapped
 phase disconnects each VM's libvirt NAT interface and verifies that it has no
-default route and cannot open an external IP. Nginx serves staged files as
+IPv4 or IPv6 default route and cannot open public IPv4 or IPv6 probes. Nginx serves staged files as
 static HTTP, and the OCI registry serves images on the isolated libvirt network.
 
 ## Architecture
@@ -52,7 +52,7 @@ install or upgrade operation.
 
 ## Tested with
 
-Test date: **2026-10-16**.
+Test date: **2026-10-17**.
 
 | Component | Pin / observed version | Status |
 |---|---|---|
@@ -62,8 +62,8 @@ Test date: **2026-10-16**.
 | QEMU / KVM | QEMU 8.2.2; `/dev/kvm` readable/writable | Two Ubuntu VMs booted and configured |
 | libvirt / virt-install | libvirt 10.0.0; virt-install 4.1.0; `qemu:///system` | NAT connectivity and disconnected-NAT isolation verified |
 | Ubuntu guest cloud image | Jammy cloud image dated `20261004`; SHA-256 `012d81fade7e8ff4428fc35dfeee711d66d1f47d5ea9c5c8ced96a85b959835c` | Pinned to official image checksum |
-| Kubean base localrelease | v0.34.2; Kubespray commit `a254f5ea687dcfaf1ce8485742363a924aa9eb60`; Kubernetes 1.34.7 | Pinned; bundle not downloaded in this sandbox |
-| Kubean upgrade localrelease/operator | v0.39.2; Kubespray commit `d5190f60715730ce91110334adf3d5596f4f5431`; Kubernetes 1.35.5 | Pinned; bundle not downloaded in this sandbox |
+| Kubean base localrelease | v0.34.2; Kubespray commit `a254f5ea687dcfaf1ce8485742363a924aa9eb60`; Kubernetes 1.34.7 | All selected release inputs downloaded and checksum-verified; transport bundle not completed |
+| Kubean upgrade localrelease/operator | v0.39.2; Kubespray commit `d5190f60715730ce91110334adf3d5596f4f5431`; Kubernetes 1.35.5 | Partial download; remaining inputs and final bundle not completed |
 | Kubean Helm chart | v0.39.2 | Pinned; installation not run |
 | Apache httpd | `docker.io/library/httpd:2.4`; digest captured in generated bundle | Tracks current 2.4 patch when prepared; image not pulled in this sandbox |
 | Local artifact services | `registry:2.8.3`; `nginx:1.27.5-alpine` | Pinned; not started in this sandbox |
@@ -93,9 +93,11 @@ checksum file is fetched over HTTPS; it is not a detached signature.
   tree instead; MinIO Client is not used by this demo.
 - Ubuntu cloud-image download and access to GitHub Releases and Docker Hub
   during the connected phase. Plan for tens of GB of storage: the two release
-  archive sets alone are about 5.3 GB compressed, before extraction, registry
-  imports, and the final transfer archive. This sandbox has about 21 GB free;
-  the full lifecycle was not attempted because the management cluster and
+  archive sets alone total about 6.1 GB (decimal) compressed, before extraction,
+  registry imports, and the final transfer archive, which duplicates most of
+  those compressed inputs. The full run needs substantially more than the
+  archive-set size; this test stopped when only 5.2 GB remained available.
+  Cluster install/upgrade was not attempted because the management cluster and
   image-import tools are also not provisioned here.
 - Each target VM gets 2 vCPU, 4 GiB RAM, and a dynamically allocated 32 GiB
   qcow2 overlay. This is a lab layout, not HA: one control-plane/etcd node and one
@@ -115,8 +117,8 @@ Run from this directory:
 This is the single-terminal orchestrator. It prints the connected phase,
 assembles the localrelease bundle, and starts the target VMs with KVM/libvirt
 while connected. It then clears the terminal, prints the air-gapped phase,
-disconnects each VM's NAT interface, and checks both route-table and
-external-IP failure. The
+disconnects each VM's NAT interface, and checks IPv4/IPv6 route tables and
+public-IP probe failure. The
 script does not print a cluster success result: the Kubean install, workload
 verification, and upgrade are explicitly **# UNTESTED** in this sandbox and
 are completed by following the runbook below.
@@ -289,7 +291,8 @@ This runbook follows Kubean's v0.39.2 offline, SSH, and upgrade examples.
      address=192.168.56.11
      [[ "$node" == worker1 ]] && address=192.168.56.12
      ssh -i .state/ssh/id_ed25519 "vagrant@$address" 'ip route show default'
-     # Expected: no output; the orchestrator also probes 1.1.1.1:443.
+     ssh -i .state/ssh/id_ed25519 "vagrant@$address" 'ip -6 route show default'
+     # Both commands should produce no output; the orchestrator also probes public IPv4 and IPv6.
    done
    ```
 
@@ -424,7 +427,7 @@ artifact formats and manifests are not interchangeable.
 - The operator/management cluster must be installed and its chart, controller,
   and both versioned spray-job images cached before the air-gapped run. The
   demo does not bootstrap an unprovisioned management cluster from zero.
-- In AIR-GAPPED, target VMs have no default route. Management Kubean jobs may
+- In AIR-GAPPED, target VMs have no IPv4 or IPv6 default route. Management Kubean jobs may
   reach only the target subnet, the management cluster's internal pod/service
   CIDRs, Nginx, and the local OCI registry. The manager host itself may retain
   physical Internet connectivity; restrict its pod egress with an enforcing
@@ -463,7 +466,7 @@ upgrade.
   `192.168.56.1:5000/library/httpd:2.4` and the containerd mirror settings in
   the Kubean Vars ConfigMap. The nodes must use HTTP only to this private lab
   registry.
-- **Node has a default route / public probe succeeds:** stop; the phase is not
+- **Node has a default route / public IPv4 or IPv6 probe succeeds:** stop; the phase is not
   air-gapped. Inspect the libvirt NAT link state and the CNI's
   NetworkPolicy enforcement before continuing.
 - **NetworkPolicy object exists but public access works:** the manager CNI
@@ -476,10 +479,14 @@ upgrade.
   and NAT-disconnect route/external-IP checks were executed successfully.
 - `./scripts/run-demo.sh --vm-smoke` is the repeatable, bundle-free path for
   demonstrating those checks; run `./scripts/cleanup.sh` afterward.
-- **# UNTESTED:** release bundle assembly/import, Kubean cluster install and
-  upgrade, and both httpd workload checks. They need a management cluster,
-  Podman/Skopeo, and substantial free storage, which were not provisioned for
-  this KVM smoke test.
+- Bundle preparation was attempted on 2026-10-17. All selected v0.34.2 inputs
+  and the initial v0.39.2 inputs were downloaded and verified; the run was
+  stopped before completing v0.39.2 when available disk space fell to 5.2 GB.
+  Partial generated files were removed. No final bundle or bundle checksum
+  manifest was produced.
+- **# UNTESTED:** complete release bundle assembly/import, Kubean cluster
+  install and upgrade, and both httpd workload checks. They still need a
+  management cluster, Podman/Skopeo, and substantially more free storage.
 - The management Kubernetes cluster, its pod-network policy enforcement, and
   the static-file/registry importing flow are documented prerequisites/runbook
   steps but are not provisioned or exercised by this sandbox.

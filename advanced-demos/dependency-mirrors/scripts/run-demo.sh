@@ -69,7 +69,6 @@ if [[ "$MODE" == full ]]; then
         -v "$ROOT/artifacts/npm-cache:/cache" \
         -v "$ROOT/scripts/pack-node-deps.cjs:/pack-node-deps.cjs:ro" \
         -v "$ROOT/artifacts/verdaccio/packages:/packages" \
-        -v "$ROOT/artifacts/npm-cache:/cache" \
         -w /src "$NODE_IMAGE" \
         sh -ec 'npm ci --cache /cache && node /pack-node-deps.cjs /src /packages /cache'
     rm -rf -- "$ROOT/.work/npm/node_modules"

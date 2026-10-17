@@ -1,4 +1,4 @@
 mirrors:
-  "zot:5000":
+  "localhost:5000":
     endpoint:
       - "http://zot:5000"

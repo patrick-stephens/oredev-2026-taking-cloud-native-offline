@@ -21,8 +21,14 @@ egress—and that a forced refresh cannot.
    the registry and scanner containers share only that network. The imported
    registry is reachable; public update endpoints are not.
 4. **Offline scan:** compare Trivy and Grype's finding counts and explain the
-   meaning of a database's build/published timestamp.
-5. **Negative proof:** show both forced online update attempts return errors.
+   meaning of a database's build/published timestamp. In the 2026-10-17
+   rehearsal, `node:16-alpine` yielded 92 Trivy findings and 145 Grype matches:
+   respectively 49 and 62 distinct CVE IDs. Then show the HIGH/CRITICAL policy
+   returning DENY (exit 1), handled explicitly as the expected result.
+5. **Negative proof:** show the direct-IP egress probe returning
+   `Network unreachable`, then both forced online update attempts failing with
+   network errors. Fresh temporary caches force real update attempts instead
+   of allowing a fresh transported DB to short-circuit the demonstration.
    A successful scan alone would not prove the environment had no internet.
 6. **Close:** ask how often the organization can re-bundle the DB and how
    freshness is enforced. Relate this to Ratify's admission policy concept:
@@ -48,6 +54,9 @@ egress—and that a forced refresh cannot.
 - **Why can the tools disagree on CVE counts?** They normalize packages and
   vulnerability sources differently. Counts are evidence that each scanner
   found issues, not a direct accuracy or severity comparison.
+- **Does every match represent a different CVE?** No. The same vulnerability
+  can affect several installed packages. The demo reports distinct `CVE-*`
+  IDs separately from findings/matches, which may also include GHSA IDs.
 - **What is the relationship to Ratify?** Ratify applies policy to image
   signatures and attestations at admission. This demo focuses on the adjacent
   operational requirement that the vulnerability database used by a policy
@@ -63,3 +72,9 @@ and verify every dependency. For the live run, omit `DEMO_AUTO_ADVANCE` so the
 script pauses between connected preparation and the air-gapped scan. Make sure
 the connected database download and image pull are recent enough for Grype's
 five-day DB freshness check.
+
+The 2026-10-17 Linux amd64 rehearsals took 259 and 261 seconds. The final
+verification summary is saved in `.state/verification.json`, alongside full
+scanner JSON and blocked-egress diagnostics. Run `./scripts/cleanup.sh` when
+finished; it retains the transport archive and evidence. The CronJob remains
+an explicitly deferred stretch goal, and ARM64 runtime steps remain untested.

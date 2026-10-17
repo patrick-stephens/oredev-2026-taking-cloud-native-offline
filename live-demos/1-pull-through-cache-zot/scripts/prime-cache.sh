@@ -5,7 +5,7 @@
 #   docker://localhost:5000/nginx:latest dir:/tmp/nginx-online
 # Inspect the API: curl -fsS http://localhost:5000/v2/nginx/tags/list | jq .
 # Inspect zot's volume (the tooling container mounts it read-only at /cache):
-# docker compose run --rm --no-deps -T --entrypoint /bin/sh skopeo \
+# docker compose run --rm --no-deps -T --interactive=false --entrypoint /bin/sh skopeo \
 #   -c 'find /cache -type f; du -sh /cache'
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
@@ -23,7 +23,7 @@ printf '\nCached tags:\n'
 curl --noproxy '*' --fail --silent --show-error --max-time 5 \
     http://localhost:5000/v2/nginx/tags/list | jq -e '.tags | select(index("latest"))'
 printf '\nLocal OCI storage (zot volume mounted read-only at /cache):\n'
-timeout 20s "${COMPOSE[@]}" run --rm --no-deps -T --entrypoint /bin/sh skopeo \
+timeout 20s "${COMPOSE[@]}" run --rm --no-deps -T --interactive=false --entrypoint /bin/sh skopeo \
     -ec 'test -s /cache/nginx/index.json
          find /cache/nginx/blobs -type f
          printf "\nBlob storage size:\n"

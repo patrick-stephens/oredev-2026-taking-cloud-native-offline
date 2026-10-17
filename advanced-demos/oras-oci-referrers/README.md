@@ -2,7 +2,7 @@
 
 | Spectrum level | Demo app | Headline tooling | Status |
 |----------------|----------|------------------|--------|
-| 2–3 | alpine | oras, zot, syft | 🚧 WIP |
+| 3 | alpine | oras, zot, syft | Verified 2026-10-17 |
 
 OCI 1.1 artifact graph (SBOM, policy, model) travels offline intact
 
@@ -134,7 +134,9 @@ registries, and retains previous evidence in separate run directories.
 
 1. Build the tools container from digest-pinned Alpine, ORAS and Syft images;
    pull the digest-pinned zot image. Direct APK tool versions are pinned in
-   [config/Dockerfile](config/Dockerfile).
+   [config/Dockerfile](config/Dockerfile). Its image defaults also support
+   standalone builds; keep them aligned with [versions.env](config/versions.env)
+   when updating pins. The orchestrator passes those pins explicitly.
 2. Copy the official Alpine image into connected zot with `--platform
    linux/amd64`. Resolve the destination digest once and use that immutable
    subject for every attachment.
@@ -251,7 +253,7 @@ namespace discards the installed firewall. Rerun the orchestrator instead.
 
 ## Tested with
 
-Test date: **2026-10-16**, Linux amd64, kernel **7.0.0-38-generic**.
+Test date: **2026-10-17**, Linux amd64, kernel **7.0.0-38-generic**.
 Image tags **and immutable digests** are recorded in
 [versions.env](config/versions.env); direct tool packages are pinned in
 [config/Dockerfile](config/Dockerfile).
@@ -269,16 +271,19 @@ Image tags **and immutable digests** are recorded in
 | Tools GNU coreutils | 9.11 |
 | ShellCheck | 0.9.0 |
 
-Verified end-to-end with two-second presenter sleeps: **18 seconds** with
-tooling already downloaded/built; the layout occupied about **3.9 MiB**.
+Verified end-to-end with two-second presenter sleeps: the 2026-10-17 rechecks
+took **18 seconds** and **78 seconds** with tooling already downloaded/built;
+**78 seconds** is the final post-fix run. The layout occupied about **3.9 MiB**.
+Allow for variation in connected upstream access and Docker operations.
 Initial tool-image pulls/builds are additional network-dependent preparation
 costs; no cold-download runtime is claimed. An exact runtime for each completed
 run is written to `result.txt`.
 
 Validation also rejected a deleted policy referrer, a corrupted layout index
-and an injected blocked packet in the workload-counter check. ShellCheck and
-Bash syntax checks passed. Repeatability and cleanup are tested; no Kubernetes
-cluster is required.
+and an injected blocked packet in the workload-counter check. The toolbox
+rebuilt successfully with `docker build --no-cache`. ShellCheck and Bash syntax
+checks passed. Repeatability, lock contention, unowned-resource protection and
+cleanup (including state purge) are tested; no Kubernetes cluster is required.
 
 ## Where network is still required
 
@@ -346,6 +351,8 @@ cluster is required.
 Pinned downloaded images and the built toolbox are retained to speed rehearsals.
 Cleanup never prunes Docker globally or touches another demo. Generated state,
 keys and certificate-like files are excluded by [.gitignore](.gitignore).
+The ignored `.demo.lock` file deliberately survives state purge so run and cleanup
+commands always lock the same inode. Do not remove it while either command is running.
 
 ## Future tooling
 
