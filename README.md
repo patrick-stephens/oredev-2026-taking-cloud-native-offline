@@ -35,6 +35,32 @@ Follow the recommended path: LIVE-1 → LIVE-2 → ADV-05 → ADV-01 → then an
 - Approximately 15 GB free disk space
 - Each demo README lists its own additional tools and pinned versions
 
+To pre-cache the host tools, container images and downloads for every demo,
+run `./scripts/provision-host.sh` (it can be re-run safely). Use
+`--only adv-01,adv-02` or `--skip adv-12` to limit the scope, and `--list` to
+see demo IDs. `adv-12` (Kubean) alone needs about 60–80 GB.
+
+## Cleanup
+
+Provisioning caches are stored in the individual demo directories; there is no
+single `artifacts/` directory to remove. After stopping a demo, use its
+`scripts/cleanup.sh` if available to remove demo resources (some cleanup
+scripts require confirmation, such as Kubean's `--yes`). Check that script's
+usage first.
+
+To remove the provisioned files, inspect and delete the relevant demo-local
+`artifacts/`, `.tools/`, and `.state/` directories. **Review `.state/` before
+removing it:** it can contain VM disks, credentials, or evidence as well as
+downloaded caches. Do not remove these directories while a demo is running or
+before its cleanup script has removed its resources.
+
+Container images remain in the shared Docker image store, and the provisioner
+does not keep an inventory of which images it added. Remove only images you
+have identified as belonging to these demos; avoid broad commands such as
+`docker system prune -a`, which can delete unrelated images and build cache.
+Helm, kind, kubectl, and any packages installed on the host are also left in
+place; the provisioner does not track whether they were already installed.
+
 ## Self-contained demos
 
 Demos are self-contained — every demo duplicates its own helper scripts so it can be used independently.
