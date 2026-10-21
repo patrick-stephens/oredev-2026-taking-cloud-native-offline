@@ -38,3 +38,18 @@ Follow the recommended path: LIVE-1 → LIVE-2 → ADV-05 → ADV-01 → then an
 ## Self-contained demos
 
 Demos are self-contained — every demo duplicates its own helper scripts so it can be used independently.
+
+## Ask an agent about the demos
+
+The repository includes a [demo-guide skill](.github/skills/demo-guide/SKILL.md)
+for agents that support Agent Skills. Ask about a demo, its tools, architecture,
+or offline requirements, or invoke `/demo-guide` in clients that support skill
+slash commands. For example:
+
+- "Which demo should I start with?"
+- "How does LIVE-2 verify its offline bundle?"
+- "What does Spegel do in the P2P demo?"
+- "Which parts of the Flux demo still need network access?"
+
+The skill guides answers back to the demo documentation and source without
+running demos or changing your environment.
