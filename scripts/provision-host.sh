@@ -7,8 +7,13 @@
 # Pins are read from each demo's own config/scripts wherever possible, so this
 # script follows the demos instead of duplicating their versions.
 #
-# Usage: scripts/provision-host.sh [--only IDS] [--skip IDS] [--no-system-packages] [--list]
+# Usage: scripts/provision-host.sh [--only IDS] [--skip IDS] [--dry-run] [--no-system-packages] [--list]
 set -euo pipefail
+
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+    printf 'ERROR: Bash 4.3 or newer is required, including for --dry-run.\n' >&2
+    exit 1
+fi
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 LIVE="$REPO_ROOT/live-demos"
@@ -72,6 +77,7 @@ else
 fi
 
 INSTALL_SYSTEM_PACKAGES=1
+DRY_RUN=0
 SELECTED=()
 SKIPPED=()
 
@@ -80,11 +86,13 @@ p_usage() {
 Usage: ${0##*/} [options]
 
 Pre-caches the tools, container images and downloads needed by the demos.
+Provisioning requires Ubuntu x86_64. Dry runs work on other OSes with Bash 4.3+.
 
 Options:
   --only IDS             Comma-separated demo IDs to provision (default: all)
   --skip IDS             Comma-separated demo IDs to skip (e.g. adv-12, which needs ~60 GiB)
   --no-system-packages   Do not apt-get install missing host commands; only report them
+  --dry-run              Print requirements and actions without changing the host
   --list                 List demo IDs and exit
   -h, --help             Show this help
 
@@ -115,6 +123,7 @@ while [[ $# -gt 0 ]]; do
         --only) [[ $# -ge 2 ]] || p_die "--only needs a value"; p_split_ids SELECTED "$2"; shift 2 ;;
         --skip) [[ $# -ge 2 ]] || p_die "--skip needs a value"; p_split_ids SKIPPED "$2"; shift 2 ;;
         --no-system-packages) INSTALL_SYSTEM_PACKAGES=0; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
         --list)
             for id in "${DEMO_IDS[@]}"; do printf '%-7s %s\n' "$id" "${DEMO_PATH[$id]}"; done
             exit 0 ;;
@@ -135,6 +144,102 @@ p_selected() {
 }
 
 # ---------------------------------------------------------------- helpers
+
+p_collect_host_requirements() {
+    local id tool
+    required_tools=()
+    missing=()
+    packages=()
+    for id in "${SELECTED[@]}"; do
+        # shellcheck disable=SC2206 # Command lists are space-separated.
+        required_tools+=(${DEMO_CMDS[$id]})
+    done
+    mapfile -t required_tools < <(printf '%s\n' "${required_tools[@]}" | sort -u)
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" >/dev/null; then
+            missing+=("$tool")
+            # shellcheck disable=SC2206 # Some commands map to several packages.
+            packages+=(${APT_PACKAGE[$tool]:-coreutils})
+        fi
+    done
+    if [[ ${#packages[@]} -gt 0 ]]; then
+        mapfile -t packages < <(printf '%s\n' "${packages[@]}" | sort -u)
+    fi
+}
+
+p_dry_run() {
+    local id tool state
+    p_log "Dry run: no installs, downloads, Docker calls, or demo scripts will be executed"
+    printf 'Normal provisioning requires Ubuntu x86_64, Docker Engine, Compose v2 and Buildx.\n'
+    printf 'Ubuntu package equivalents for selected demos (adapt these for your OS):\n'
+    p_collect_host_requirements
+    for tool in "${required_tools[@]}"; do
+        state=missing
+        command -v "$tool" >/dev/null && state="on PATH"
+        printf '  %-14s -> %-50s [%s]\n' "$tool" "${APT_PACKAGE[$tool]:-coreutils}" "$state"
+    done
+    if [[ ${#packages[@]} -eq 0 ]]; then
+        printf 'No system packages would be installed: all required commands are on PATH.\n'
+    elif [[ $INSTALL_SYSTEM_PACKAGES == 0 ]]; then
+        printf 'System package installation disabled by --no-system-packages.\n'
+        printf 'Missing commands: %s\nUbuntu packages needed: %s\n' "${missing[*]}" "${packages[*]}"
+    else
+        printf 'Would install missing commands on Ubuntu with:\n'
+        printf '  sudo apt-get update -qq\n  sudo apt-get install -y -qq %s\n' "${packages[*]}"
+    fi
+    printf '\nCommand presence only was checked; versions, Docker, caches and VM access were not checked.\n'
+    printf 'Downloads below are for linux/amd64, not native tools for another OS.\n'
+    printf 'Shared binaries would be installed in %s when needed:\n' "$BIN_DIR"
+    if p_selected live-2 || p_selected adv-02 || p_selected adv-04 || p_selected adv-12; then
+        printf '  Ensure Helm %s, downloading and checksum-verifying it if the pinned version is absent.\n' "$HELM_VERSION"
+    fi
+    if p_selected live-2 || p_selected adv-04; then
+        printf '  Ensure kind %s, downloading and checksum-verifying it if the pinned version is absent.\n' "$KIND_VERSION"
+    fi
+    if p_selected adv-12; then
+        printf '  Keep existing kubectl; otherwise download and checksum-verify %s.\n' "$KUBECTL_VERSION"
+    fi
+    for id in "${SELECTED[@]}"; do
+        p_log "[$id] ${DEMO_PATH[$id]}"
+        printf '  Would run provision_%s from this script, reusing cached files/images where available:\n' "$id"
+        case "$id" in
+            live-1) printf '  Pull the compose.yaml tools profile images with Docker Compose.\n' ;;
+            live-2) printf '  Pull the node, zot, skopeo and cosign images pinned in scripts/common.sh.\n' ;;
+            adv-01)
+                printf '  Run scripts/install-tools.sh for local Zarf/k3d; pull images from scripts/common.sh.\n'
+                printf '  Download and checksum-verify the Zarf init package into artifacts/.\n' ;;
+            adv-02)
+                printf '  Install/check local k3d using scripts/common.sh; pull k3s, registry, Redis, Spegel and k3d images.\n' ;;
+            adv-03)
+                printf '  Pull images pinned by scripts/common.sh and config/versions.env.\n'
+                printf '  Build the ORAS tools image from config/Dockerfile if it is not cached.\n' ;;
+            adv-04)
+                printf '  Download and checksum-verify notation/cosign/oras/syft tools into .state/ profiles.\n'
+                printf '  Pull pinned images; download, verify and render Ratify/Gatekeeper charts to discover and pull policy images.\n' ;;
+            adv-05)
+                printf '  Pull registry, skopeo, runtime and candidate images from scripts/common.sh and scripts/run-demo.sh.\n' ;;
+            adv-06)
+                printf '  Run scripts/prepare.sh and scripts/prepare-k0s.sh to cache binaries, air-gap bundles and image archives in artifacts/.\n' ;;
+            adv-07)
+                printf '  Run scripts/install-tools.sh for local Flux/kind/kubectl/Helm and pull pinned images.\n'
+                printf '  Export Flux manifests and download the Argo CD manifest to discover and pull controller images.\n' ;;
+            adv-08) printf '  Pull all images from config/base-images.env.\n' ;;
+            adv-09) printf '  Check the default Buildx builder and pull images from config/versions.env.\n' ;;
+            adv-10)
+                printf '  Run scripts/install-tools.sh, pull pinned images, and check bwrap network namespace support.\n' ;;
+            adv-11)
+                printf '  Pull pinned images and Harbor/Dragonfly service images from config/versions.env.\n'
+                printf '  Download the Harbor installer into .state/harbor-installer.tgz and validate the archive.\n' ;;
+            adv-12)
+                printf '  Check free space (60-80 GiB needed); run scripts/prepare-bundle.sh if the lifecycle bundle is absent.\n'
+                printf '  Cache the checksum-verified Ubuntu cloud image in .state/images/ and pull bundle images.\n'
+                printf '  Add/update the kubean-io Helm repository, render its pinned chart, and pull operator/admission/spray-job images.\n'
+                printf '  Check /dev/kvm and libvirt access without creating VMs.\n' ;;
+        esac
+    done
+    printf '\nImage/chart pins and download URLs are resolved from the referenced files during provisioning.\n'
+    printf 'This plan does not run the demos or pre-cache their deliberately live CONNECTED-phase fetches.\n'
+}
 
 p_require_cmds() {
     local tool missing=()
@@ -443,7 +548,24 @@ provision_adv-12() {
 
 # ---------------------------------------------------------------- host checks
 
+if [[ $DRY_RUN == 1 ]]; then
+    p_dry_run
+    exit 0
+fi
+
 p_log "Host checks"
+[[ "$(uname -s)" == Linux ]] ||
+    p_die "Provisioning requires Ubuntu; use --dry-run to view requirements and adapt them for your OS."
+distro="$(
+    if [[ -r /etc/os-release ]]; then
+        source /etc/os-release
+        printf '%s' "${ID:-unknown}"
+    else
+        printf 'unknown'
+    fi
+)"
+[[ "$distro" == ubuntu ]] ||
+    p_die "Provisioning requires Ubuntu (detected: $distro); use --dry-run to view requirements and adapt them for your OS."
 [[ "$(uname -s)/$(uname -m)" == Linux/x86_64 ]] || p_die "The demos pin linux/amd64; use a native Linux x86_64 host."
 command -v docker >/dev/null || p_die "Install Docker Engine first: https://docs.docker.com/engine/install/"
 docker info >/dev/null 2>&1 || p_die "Docker is not reachable; start it and ensure you can run docker without sudo."
@@ -452,20 +574,8 @@ docker compose version >/dev/null 2>&1 || p_die "Docker Compose v2 plugin is req
 docker buildx version >/dev/null 2>&1 || p_die "Docker Buildx plugin is required."
 p_ok "docker $(docker version --format '{{.Server.Version}}'), $(docker compose version --short 2>/dev/null || echo compose), buildx"
 
-missing=()
-for id in "${SELECTED[@]}"; do
-    for tool in ${DEMO_CMDS[$id]}; do
-        command -v "$tool" >/dev/null || missing+=("$tool")
-    done
-done
+p_collect_host_requirements
 if [[ ${#missing[@]} -gt 0 ]]; then
-    mapfile -t missing < <(printf '%s\n' "${missing[@]}" | sort -u)
-    packages=()
-    for tool in "${missing[@]}"; do
-        # shellcheck disable=SC2206 # Some commands map to several packages.
-        packages+=(${APT_PACKAGE[$tool]:-coreutils})
-    done
-    mapfile -t packages < <(printf '%s\n' "${packages[@]}" | sort -u)
     if [[ $INSTALL_SYSTEM_PACKAGES == 1 ]] && command -v apt-get >/dev/null; then
         p_log "Installing missing host commands (${missing[*]}) via apt: ${packages[*]}"
         sudo_cmd=()

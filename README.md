@@ -40,6 +40,15 @@ run `./scripts/provision-host.sh` (it can be re-run safely). Use
 `--only adv-01,adv-02` or `--skip adv-12` to limit the scope, and `--list` to
 see demo IDs. `adv-12` (Kubean) alone needs about 60–80 GB.
 
+The provisioner only makes changes on **Ubuntu x86_64**. On another OS, use
+`./scripts/provision-host.sh --dry-run` (requires Bash 4.3 or newer) to print
+the required commands, their Ubuntu package equivalents, the packages missing
+from your current PATH, and the planned per-demo actions. This mode does not
+install packages, download files, invoke Docker, or run demo scripts; it can be
+combined with `--only`, `--skip`, and `--no-system-packages`. Use the output to
+adapt provisioning for your OS. It is a plan, not a compatibility check:
+downloaded binaries and demo images still target Linux amd64.
+
 ## Cleanup
 
 Provisioning caches are stored in the individual demo directories; there is no
