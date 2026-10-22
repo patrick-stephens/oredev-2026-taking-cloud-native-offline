@@ -1,0 +1,46 @@
+name: Demo run-through
+
+on:
+  workflow_call:
+    inputs:
+      demo:
+        description: Demo ID to provision and run
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      demo:
+        description: Demo ID to provision and run
+        required: true
+        type: choice
+        options:
+          - live-1
+          - live-2
+          - adv-01
+          - adv-02
+          - adv-03
+          - adv-04
+          - adv-05
+          - adv-06
+          - adv-07
+          - adv-08
+          - adv-09
+          - adv-10
+          - adv-11
+
+permissions:
+  contents: read
+
+jobs:
+  run-demo:
+    name: Provision and run ${{ inputs.demo }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Provision and run selected demo
+        env:
+          DEMO_ID: ${{ inputs.demo }}
+        run: scripts/ci/run-demo.sh "$DEMO_ID"

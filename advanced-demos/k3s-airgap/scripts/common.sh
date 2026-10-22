@@ -122,14 +122,15 @@ assert_isolated() {
 }
 
 remove_runtime() {
-  if docker container inspect "$NODE" >/dev/null 2>&1; then
-    [[ "$(docker inspect "$NODE" --format '{{index .Config.Labels "io.taking-offline.demo"}}')" == k3s-airgap ]] ||
-      die "Refusing to delete unowned container $NODE."
-    docker rm -fv "$NODE"
+  local node="${1:-$NODE}" network="${2:-$NETWORK}"
+  if docker container inspect "$node" >/dev/null 2>&1; then
+    [[ "$(docker inspect "$node" --format '{{index .Config.Labels "io.taking-offline.demo"}}')" == k3s-airgap ]] ||
+      die "Refusing to delete unowned container $node."
+    docker rm -fv "$node"
   fi
-  if docker network inspect "$NETWORK" >/dev/null 2>&1; then
-    [[ "$(docker network inspect "$NETWORK" --format '{{index .Labels "io.taking-offline.demo"}}')" == k3s-airgap ]] ||
-      die "Refusing to delete unowned network $NETWORK."
-    docker network rm "$NETWORK"
+  if docker network inspect "$network" >/dev/null 2>&1; then
+    [[ "$(docker network inspect "$network" --format '{{index .Labels "io.taking-offline.demo"}}')" == k3s-airgap ]] ||
+      die "Refusing to delete unowned network $network."
+    docker network rm "$network"
   fi
 }

@@ -53,16 +53,16 @@ the interesting change is the supply-chain packaging around a familiar image.
 
 ### AIR-GAPPED: prove the outage, then prove the result
 
-5. **Phase 4 — Remove the crutch.** Source zot and its uplink disappear. The
+1. **Phase 4 — Remove the crutch.** Source zot and its uplink disappear. The
    destination is a second registry with new storage on an internal network.
    Clients share its namespace. Firewall rules allow only loopback; even Docker
    DNS forwarding is blocked. Public-address and DNS probes must fail.
-6. **Phase 5 — The destination has to reconstruct it.** Import the OCI layout.
+2. **Phase 5 — The destination has to reconstruct it.** Import the OCI layout.
    Show the same image and four referrer digests. ORAS pulls the three data
    payloads and compares original bytes. Cosign fetches its bundle from isolated
    zot and verifies the image with the saved public key. The wrong key must fail
    cryptographically; it is not enough to get a generic connection error.
-7. **Finish on the stronger assertion.** After intentional probes are reset,
+3. **Finish on the stronger assertion.** After intentional probes are reset,
    external-rejection counters must remain zero throughout the actual workload.
    Do not confuse that packet-level check with tracing every failed `connect()`
    syscall: a no-route failure can happen before OUTPUT.

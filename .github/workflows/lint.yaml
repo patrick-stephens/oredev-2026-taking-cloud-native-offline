@@ -1,0 +1,215 @@
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+      - name: Lint shell scripts
+        run: |
+          git ls-files -z '*.sh' |
+            xargs -0 shellcheck --severity=warning
+
+  markdownlint:
+    name: MarkdownLint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Lint Markdown
+        uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
+        with:
+          globs: '**/*.md'
+
+  yamllint:
+    name: YAMLlint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install yamllint
+        run: python -m pip install yamllint==1.38.0
+      - name: Lint YAML
+        run: |
+          git ls-files -z '*.yaml' '*.yml' |
+            xargs -0 yamllint --strict
+
+  python:
+    name: Python (Ruff)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install Ruff
+        run: python -m pip install ruff==0.17.1
+      - name: Lint Python
+        run: |
+          mapfile -d '' files < <(git ls-files -z '*.py')
+          ruff check "${files[@]}"
+          ruff format --check "${files[@]}"
+
+  dockerfiles:
+    name: Hadolint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Hadolint
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-linux-x86_64 \
+            --output "$RUNNER_TEMP/hadolint"
+          printf '%s  %s\n' \
+            c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507 \
+            "$RUNNER_TEMP/hadolint" |
+            sha256sum --check -
+          chmod 0755 "$RUNNER_TEMP/hadolint"
+      - name: Lint Dockerfiles
+        run: |
+          mapfile -d '' files < <(git ls-files -z '*Dockerfile*')
+          for file in "${files[@]}"; do
+            "$RUNNER_TEMP/hadolint" "$file"
+          done
+
+  go:
+    name: Go (gofmt and vet)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.27.3
+      - name: Check formatting
+        run: |
+          mapfile -d '' files < <(git ls-files -z '*.go')
+          unformatted="$(gofmt -l "${files[@]}")"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Go files need gofmt:\n%s\n' "$unformatted" >&2
+            exit 1
+          fi
+      - name: Vet Go applications
+        run: |
+          (cd advanced-demos/apko-melange-offline/apps/hello && go vet ./...)
+          (cd advanced-demos/dependency-mirrors/apps/go-cli && go vet ./...)
+          (cd advanced-demos/multi-arch-bundle/apps/arm64-static-web &&
+            GO111MODULE=off go vet main.go)
+
+  helm:
+    name: Helm charts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.0
+      - name: Lint Helm charts
+        run: |
+          helm lint live-demos/2-offline-bundle-cosign/chart \
+            --values live-demos/2-offline-bundle-cosign/values.yaml --strict
+          helm lint advanced-demos/k3s-airgap/config/chart --strict
+
+  config:
+    name: JSON and Docker Compose
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate JSON
+        run: |
+          mapfile -d '' files < <(git ls-files -z '*.json')
+          for file in "${files[@]}"; do
+            jq empty "$file"
+          done
+      - name: Validate Docker Compose
+        env:
+          DEMO_DB_PASSWORD: lint-validation-only
+        run: |
+          source advanced-demos/harbor-dragonfly-preheat/scripts/common.sh
+          dc config --quiet
+          docker compose \
+            --file live-demos/1-pull-through-cache-zot/compose.yaml \
+            config --quiet
+          set -a
+          source advanced-demos/kubean-lifecycle/config/versions.env
+          set +a
+          docker compose \
+            --file advanced-demos/kubean-lifecycle/config/services.compose.yaml \
+            config --quiet
+
+  workflows:
+    name: GitHub Actions (actionlint and pinact)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Actively maintained actionlint fork; bundles ShellCheck and pyflakes.
+      - name: Lint workflows
+        uses: kjanat/actionlint@08bb2c4f0d039744455b87aef1c647fb8b66d37b # v1.17.0
+      - name: Install pinact
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/suzuki-shunsuke/pinact/releases/download/v5.0.1/pinact_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/pinact.tar.gz"
+          printf '%s  %s\n' \
+            12500c0fff5db94a0155e2e76ed959d1dc0e899056ee168d8fb7b4840e7c04f0 \
+            "$RUNNER_TEMP/pinact.tar.gz" |
+            sha256sum --check -
+          tar -xzf "$RUNNER_TEMP/pinact.tar.gz" -C "$RUNNER_TEMP" pinact
+      - name: Verify actions are pinned to commit SHAs
+        run: '"$RUNNER_TEMP/pinact" run --fix=false --no-api'
+
+  pre-commit:
+    name: pre-commit (hygiene, secrets, spelling, schemas, zizmor)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Install pre-commit
+        run: python -m pip install pre-commit==4.7.0
+      - name: Run remaining pre-commit hooks
+        env:
+          # These hooks already have dedicated jobs above.
+          SKIP: >-
+            shellcheck,markdownlint-cli2,yamllint,ruff-check,ruff-format,hadolint,golangci-lint-fmt,actionlint
+        run: pre-commit run --all-files --show-diff-on-failure

@@ -8,9 +8,7 @@ esac
 require docker
 docker info >/dev/null
 remove_runtime
-NODE='taking-offline-k0s-airgap'
-NETWORK='taking-offline-k0s-airgap'
-remove_runtime
+remove_runtime taking-offline-k0s-airgap taking-offline-k0s-airgap
 if [[ "${1:-}" == --purge ]]; then
   # Only these two generated directories belong to this demo.
   rm -rf -- "$ROOT/artifacts" "$ROOT/.state"

@@ -1,0 +1,19 @@
+extends: default
+
+ignore: |
+  advanced-demos/k3s-airgap/config/chart/templates/*.yaml
+  live-demos/2-offline-bundle-cosign/chart/templates/*.yaml
+
+rules:
+  comments:
+    min-spaces-from-content: 1
+  document-start: disable
+  line-length:
+    max: 120
+    level: warning
+  truthy:
+    allowed-values:
+      - 'true'
+      - 'false'
+      - 'on'
+    check-keys: false

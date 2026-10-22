@@ -45,3 +45,21 @@ The live-demo companion agents deliver their work in local `demo-cache/` and `de
 ## Versions and assumptions
 
 Append tested tool versions to [`docs/tested-versions.md`](docs/tested-versions.md) and to the relevant demo README. Record external dependencies and their offline strategies in the demo's assumption matrix.
+
+## CI validation
+
+The `Lint` workflow runs each linter as a separate job on pull requests and pushes to `main`, plus a `pre-commit` job for the remaining hygiene, secret-scanning, spelling, schema, and workflow-security hooks. GitHub Actions references must be pinned to full commit SHAs: use `pinact run` to pin them; CI and zizmor enforce this. Workflows are linted with the actively maintained [kjanat/actionlint](https://github.com/kjanat/actionlint) fork of actionlint (both the CI action and the pre-commit hook), which also supports GitHub's `$/` self-repository reusable-workflow syntax.
+
+Run the same checks locally before committing with [pre-commit](https://pre-commit.com/):
+
+```bash
+python3 -m pip install --user pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+All hooks come from their upstream projects, and revisions in `.pre-commit-config.yaml` are frozen to commit SHAs; refresh them with `pre-commit autoupdate --freeze` and check that each frozen tag matches the project's latest release. Dependabot proposes weekly grouped updates for both GitHub Actions and pre-commit hooks after a 7-day cooldown. Tool versions installed directly in `lint.yaml` (yamllint, Ruff, Hadolint, Go, Helm, pinact, and pre-commit) are not managed by Dependabot; keep them aligned with `.pre-commit-config.yaml` manually.
+
+`shfmt` and JSON auto-formatting are intentionally not enabled: they would rewrite most existing shell scripts and committed configuration/SBOM files without fixing defects.
+
+The reusable `Demo run-through` workflow provisions and runs one demo on a dedicated self-hosted runner labeled `offline-demo`. The runner must be Ubuntu x86_64 with rootful Docker Engine, Compose v2, Buildx, sufficient disk/memory, and non-interactive sudo. It runs repository code with host privileges, so do not expose the runner to fork pull requests. Manual runs can select a demo; select the PR branch in the Actions branch selector to test its changes. `Demo matrix` runs the supported demos sequentially. ADV-12 is omitted because it requires an external Kubean management cluster and additional virtualization setup.

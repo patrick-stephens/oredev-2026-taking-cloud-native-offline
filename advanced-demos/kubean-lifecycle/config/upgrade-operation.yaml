@@ -14,5 +14,9 @@ spec:
       action: |
         calico_task=/kubespray/roles/network_plugin/calico/tasks/install.yml
         test "$(grep -Fc 'stdin: "{{ _calico_pool_merged | to_json }}"' "$calico_task")" -eq 1
-        sed -i 's/_calico_pool_merged | to_json/_calico_pool_merged | combine(dict(spec=dict(blockSize=_calico_pool_merged.spec.blockSize | int)), recursive=True) | to_json/' "$calico_task"
+        integer_spec='dict(spec=dict(blockSize=_calico_pool_merged.spec.blockSize | int))'
+        corrected_serialization="_calico_pool_merged | combine($integer_spec, recursive=True) | to_json"
+        sed -i \
+          "s/_calico_pool_merged | to_json/$corrected_serialization/" \
+          "$calico_task"
         echo 'Applied pinned Calico IPPool integer-serialization correction; network tasks remain enabled.'

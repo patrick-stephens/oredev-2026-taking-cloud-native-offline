@@ -157,18 +157,20 @@ actual admission readiness. Availability is deliberately a trade-off, and this
 outage exercise is not an extra phase in the normal presentation run. The
 policy does not cover every namespace or harden privileged workloads.
 
-**"Can the host or a malicious privileged workload bypass this?"**  
+### Can the host or a malicious privileged workload bypass this?
+
 Yes. The host is trusted, and production needs RBAC and privilege/network
 restrictions. This is not a hardened hostile multi-tenant boundary.
 
-**"Could this require an SBOM too?"**  
+### Could this require an SBOM too?
+
 Yes: run the tested SBOM profile. The custom Rego requires a valid image
 signature AND an SPDX artifact with a trusted nested signature bound through
 OCI subject digests. The chart's default policy alone does not require an SBOM.
 This is a signed artifact, not a DSSE statement or proof of inventory accuracy.
 The SPDX verifier is alpha; do not sell this demo as a production certification.
 
-**"Does cosign still need public infrastructure?"**
+### Does cosign still need public infrastructure?
 
 Not in this profile: Ratify trusts a staged public key with log verification
 disabled, and signing does not upload to a log. The tested cosign 2.4.3 OCI mode

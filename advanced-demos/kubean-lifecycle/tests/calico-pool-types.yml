@@ -18,7 +18,11 @@
           - (merged_pool | to_json | from_json).spec.blockSize is string
     - name: Assert the corrected serialization preserves the immutable integer
       vars:
-        serialized_pool: "{{ merged_pool | combine(dict(spec=dict(blockSize=merged_pool.spec.blockSize | int)), recursive=True) | to_json | from_json }}"
+        serialized_pool: >-
+          {{ merged_pool | combine(
+              dict(spec=dict(blockSize=merged_pool.spec.blockSize | int)),
+              recursive=True
+          ) | to_json | from_json }}
       ansible.builtin.assert:
         that:
           - serialized_pool.spec.blockSize is integer

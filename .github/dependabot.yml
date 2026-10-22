@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    cooldown:
+      default-days: 7
+    groups:
+      all-actions:
+        patterns:
+          - '*'
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 1
+    cooldown:
+      default-days: 7
+    groups:
+      all-pre-commit-hooks:
+        patterns:
+          - '*'
