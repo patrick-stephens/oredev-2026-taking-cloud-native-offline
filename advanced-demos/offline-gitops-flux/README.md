@@ -68,7 +68,9 @@ The internal service IPs are substituted into the generated kind
 configuration and Git repository, so Flux does not rely on Docker DNS being
 available to pods. kind's containerd is configured for HTTP access to the
 local registry; this is deliberately an unauthenticated, disposable demo
-registry.
+registry. The curl probe is staged into kind as an explicit `linux/amd64`
+archive, avoiding imports of unavailable platforms from its multi-platform
+image index.
 
 ## Tested with
 

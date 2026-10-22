@@ -158,7 +158,8 @@ for firewall in iptables ip6tables; do
         -m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j ACCEPT
     docker exec "$CLUSTER_NODE" "$firewall" -I FORWARD 2 -o "$external_iface" -j REJECT
 done
-"$TOOLS_DIR/kind" load docker-image "$CURL_IMAGE" --name "$CLUSTER_NAME"
+docker image save --platform linux/amd64 --output "$STATE_DIR/curl-amd64.tar" "$CURL_IMAGE"
+"$TOOLS_DIR/kind" load image-archive "$STATE_DIR/curl-amd64.tar" --name "$CLUSTER_NAME"
 printf 'Cluster prepared; external-interface egress rules installed before AIR-GAPPED begins.\n'
 
 pause_for_presenter

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # From live-demos/2-offline-bundle-cosign: ./scripts/cleanup.sh
 # Removes only this demo's Kubernetes cluster, labeled registry storage/network.
-# Preserves bundle.tar.gz and ignored keys/ for transport and repeat runs.
+# Preserves bundle.tar.gz and local signing keys for transport and repeat runs.
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 banner "6 / CLEANUP: remove the disposable air-gapped target"
@@ -25,4 +25,4 @@ if docker network inspect "$NETWORK" >/dev/null 2>&1; then
         die "Refusing to delete an unowned network."
     docker network rm "$NETWORK" >/dev/null
 fi
-printf 'CLEAN: target removed; bundle and signing keys retained locally and gitignored.\n'
+printf 'CLEAN: target removed; bundle and signing keys retained locally.\n'

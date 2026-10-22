@@ -30,8 +30,8 @@ CDN or object-storage hosts.
 | Compile the Go application | None | AIR-GAPPED | The source uses only the Go standard library; `GOPROXY=off`, `GOSUMDB=off`, and `GOTOOLCHAIN=local` prevent module or toolchain retrieval. |
 | `melange build` | None | AIR-GAPPED | Runs under bubblewrap `--unshare-net`, consumes staged APKs and Alpine keys, and signs the resulting APK with a local ephemeral key. |
 | `apko build --offline` | None | AIR-GAPPED | Runs in the same networkless namespace and consumes only the locally signed melange repository and local keys. |
-| Push and pull the app image | None outside the internal Docker bridge | AIR-GAPPED | `ctr` pushes from the k3d node to zot over `zot:5000`; kubelet pulls the image from that mirror. The app image is removed from node containerd after the push so the pod must pull it from zot. |
-| k3d runtime dependency | None during this phase | AIR-GAPPED | The pause image is staged in CONNECTED and imported into node containerd. No kubelet fallback to Docker Hub is needed. |
+| Push and pull the app image | None outside the internal Docker bridge | AIR-GAPPED | A pre-staged Skopeo container converts the local Docker archive to OCI media types and copies it to zot over `zot:5000`; kubelet pulls the image from that mirror. The app image is never imported into node containerd, so the pod must pull it from zot. |
+| k3d runtime dependency | None during this phase | AIR-GAPPED | The pause image is staged in CONNECTED and imported into node containerd from an explicit `linux/amd64` archive. No kubelet fallback to Docker Hub is needed. |
 
 **Conclusion:** the tested melange recipe and apko assembly are fully offline
 after staging. Network is unavoidable for the preceding acquisition of tools,
@@ -45,6 +45,7 @@ network namespace.
 CONNECTED host
   ├── checksum-pinned tools: melange, apko, kubectl, k3d
   ├── digest-pinned images: Alpine, nginx baseline, zot, k3s, pause, k3d helpers
+  ├── Skopeo container: quay.io/skopeo/stable:v1.20.0
   └── signed Alpine indexes + recursive Go APK closure + Alpine public keys
                          │ staged files and local Docker image cache
                          ▼
@@ -53,7 +54,7 @@ AIR-GAPPED
   │ local Go source + APK closure ──> melange ──> signed Go APK     │
   │ signed APK repository ──────────> apko --offline ──> OCI image  │
   └─────────────────────────────────────────────────────────────────┘
-                         │ local Docker save/import
+                         │ local Docker archive + Skopeo copy
                          ▼
   Docker --internal network (no external egress)
   ┌──────────┐   OCI push/pull   ┌─────────┐    ┌───────────────┐

@@ -49,7 +49,8 @@ but only after connected staging has acquired exact inputs and trust keys.
   probe verifies that Docker still blocks external egress.
 - **Why not push from the host Docker CLI?** Docker treats a non-loopback
   registry address as HTTPS, and Docker does not publish ports on this
-  internal network. `ctr` pushes from the node to zot over internal HTTP
+  internal network. A pre-staged Skopeo container pushes the Docker archive to
+  zot over internal HTTP
   without weakening host daemon registry settings.
 - **Why stage the pause image?** It is required before a workload container
   can start. Without it, kubelet attempts a remote Docker Hub pull even when

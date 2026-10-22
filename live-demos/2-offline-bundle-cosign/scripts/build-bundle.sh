@@ -5,7 +5,7 @@
 #   docker://docker.io/library/postgres:18.6-alpine3.23 dir:images/postgres
 # helm lint chart --set auth.existingSecret=offline-postgresql-auth
 # helm package chart --destination charts
-# cosign sign-blob --tlog-upload=false --key keys/cosign.key \
+# cosign sign-blob --tlog-upload=false --key .state/signing/cosign.key \
 #   --output-signature metadata.sig metadata.json
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
@@ -16,23 +16,25 @@ ensure_image "$COSIGN"
 umask 077
 work="$(mktemp -d "$DEMO_DIR/.build.XXXXXXXX")"
 trap 'remove_workdir "$work"' EXIT
-mkdir -p "$DEMO_DIR/keys" "$work/charts" "$work/images/postgres" "$work/keys"
-chmod 700 "$DEMO_DIR/keys"
+mkdir -p "$SIGNING_DIR" "$work/charts" "$work/images/postgres" "$work/keys"
+chmod 700 "$SIGNING_DIR"
 
-if [[ ! -e "$DEMO_DIR/keys/cosign.key" && ! -e "$DEMO_DIR/keys/cosign.pub" ]]; then
-    head -c 32 /dev/urandom | base64 > "$DEMO_DIR/keys/password"
-    COSIGN_PASSWORD="$(<"$DEMO_DIR/keys/password")"
+if [[ ! -e "$COSIGN_KEY" && ! -e "$COSIGN_PUB" ]]; then
+    if [[ ! -s "$COSIGN_PASSWORD_FILE" ]]; then
+        head -c 32 /dev/urandom | base64 > "$COSIGN_PASSWORD_FILE"
+    fi
+    COSIGN_PASSWORD="$(<"$COSIGN_PASSWORD_FILE")"
     export COSIGN_PASSWORD
     signing_tool "$work" generate-key-pair
 fi
-[[ -s "$DEMO_DIR/keys/cosign.key" && -s "$DEMO_DIR/keys/cosign.pub" &&
-    -s "$DEMO_DIR/keys/password" ]] || die "Incomplete keys/ directory; restore the keypair and password."
-COSIGN_PASSWORD="$(<"$DEMO_DIR/keys/password")"
+[[ -s "$COSIGN_KEY" && -s "$COSIGN_PUB" &&
+    -s "$COSIGN_PASSWORD_FILE" ]] || die "Incomplete signing keypair or password in $SIGNING_DIR."
+COSIGN_PASSWORD="$(<"$COSIGN_PASSWORD_FILE")"
 export COSIGN_PASSWORD
 signing_tool "$work" public-key --key /keys/cosign.key > "$work/derived.pub"
-cmp "$work/derived.pub" "$DEMO_DIR/keys/cosign.pub" ||
+cmp "$work/derived.pub" "$COSIGN_PUB" ||
     die "The private and public signing keys do not match."
-cp "$DEMO_DIR/keys/cosign.pub" "$work/keys/cosign.pub"
+cp "$COSIGN_PUB" "$work/keys/cosign.pub"
 
 helm lint "$DEMO_DIR/chart" -f "$DEMO_DIR/values.yaml" --strict
 helm package "$DEMO_DIR/chart" --destination "$work/charts"
@@ -68,6 +70,6 @@ tar -C "$work" -czf "$work/bundle.tar.gz" \
     charts images keys values.yaml metadata.json metadata.sig
 mv "$work/bundle.tar.gz" "$DEMO_DIR/bundle.tar.gz"
 printf '\nBUNDLE: %s/bundle.tar.gz\n' "$DEMO_DIR"
-printf 'TRUST OUT OF BAND: copy keys/cosign.pub separately to the target.\n'
-sha256sum "$DEMO_DIR/keys/cosign.pub"
+printf 'TRUST OUT OF BAND: copy %s separately to the target.\n' "$COSIGN_PUB"
+sha256sum "$COSIGN_PUB"
 jq '{image,chart,authenticatedFiles:(.files|length)}' "$work/metadata.json"

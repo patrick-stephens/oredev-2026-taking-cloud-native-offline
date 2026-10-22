@@ -144,7 +144,7 @@ helm lint chart -f values.yaml --strict
 helm package chart --destination charts
 skopeo copy --override-os linux --override-arch amd64 \
   docker://docker.io/library/postgres:18.6-alpine3.23 dir:images/postgres
-cosign sign-blob --yes --tlog-upload=false --key keys/cosign.key \
+cosign sign-blob --yes --tlog-upload=false --key .state/signing/cosign.key \
   --output-signature metadata.sig metadata.json
 ```
 
@@ -161,10 +161,13 @@ bundle.tar.gz
   metadata.sig
 ```
 
-The first build generates `keys/cosign.key`, `keys/cosign.pub` and
-`keys/password` under a private, ignored directory. Subsequent builds reuse and
-validate that keypair, not silently rotate it. **The private key and password
-are never transported.** Database credentials are not in the bundle either.
+The first build generates `.state/signing/cosign.key`,
+`.state/signing/cosign.pub` and `.state/signing/password` under the private,
+ignored state directory. The repository's existing `keys/cosign.pub` is left
+untouched; it has no matching private key in a clean checkout. Subsequent builds
+reuse and validate the generated keypair, not silently rotate it. **The private
+key and password are never transported.** Database credentials are not in the
+bundle either.
 
 Expected:
 
@@ -174,7 +177,7 @@ Expected:
 Successfully packaged chart ...
 Wrote signature to file /bundle/metadata.sig
 BUNDLE: .../live-demos/2-offline-bundle-cosign/bundle.tar.gz
-TRUST OUT OF BAND: copy keys/cosign.pub separately to the target.
+TRUST OUT OF BAND: copy .state/signing/cosign.pub separately to the target.
 ```
 
 The tested archive is approximately **113 MiB**, with 15 authenticated files.
@@ -207,7 +210,7 @@ OFFLINE: target has no IPv4/IPv6 default route; host networking is unchanged.
 ### 3. Receive and authenticate
 
 ```bash
-./scripts/verify-import.sh --trusted-key "$PWD/keys/cosign.pub"
+./scripts/verify-import.sh --trusted-key "$PWD/.state/signing/cosign.pub"
 ```
 
 A real target receives `bundle.tar.gz` and separately enrolls the trusted key.
@@ -321,7 +324,7 @@ PASS: target still has no IPv4/IPv6 default route.
 With a prepared target:
 
 ```bash
-./scripts/verify-import.sh --trusted-key "$PWD/keys/cosign.pub" --tamper
+./scripts/verify-import.sh --trusted-key "$PWD/.state/signing/cosign.pub" --tamper
 ```
 
 This changes only the extracted image manifest, not the archive or inventory.
@@ -343,8 +346,8 @@ The wrapper cleans automatically. Manual phase runs leave the target alive:
 ```bash
 ./scripts/build-bundle.sh
 ./scripts/prepare-target.sh
-./scripts/verify-import.sh --trusted-key "$PWD/keys/cosign.pub"
-./scripts/verify-import.sh --trusted-key "$PWD/keys/cosign.pub" # upgrade, same Secret/PVC
+./scripts/verify-import.sh --trusted-key "$PWD/.state/signing/cosign.pub"
+./scripts/verify-import.sh --trusted-key "$PWD/.state/signing/cosign.pub" # upgrade, same Secret/PVC
 ./scripts/cleanup.sh
 ./scripts/cleanup.sh
 ```
@@ -356,7 +359,7 @@ The bundle, keys and preloaded tool images remain locally and gitignored.
 After cleanup, optionally remove only the generated signing identity:
 
 ```bash
-rm -f keys/cosign.key keys/cosign.pub keys/password
+rm -f .state/signing/cosign.key .state/signing/cosign.pub .state/signing/password
 ```
 
 The next build generates a new identity, requiring deliberate trust re-enrollment.

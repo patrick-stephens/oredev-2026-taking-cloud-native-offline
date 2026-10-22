@@ -5,6 +5,15 @@ set -euo pipefail
 
 DEMO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE="$DEMO_DIR/.state"
+KEYS_DIR="$DEMO_DIR/keys"
+if [[ -e "$KEYS_DIR/cosign.key" || -e "$KEYS_DIR/password" ]]; then
+    SIGNING_DIR="$KEYS_DIR"
+else
+    SIGNING_DIR="$STATE/signing"
+fi
+COSIGN_KEY="$SIGNING_DIR/cosign.key"
+COSIGN_PUB="$SIGNING_DIR/cosign.pub"
+COSIGN_PASSWORD_FILE="$SIGNING_DIR/password"
 CLUSTER=offline-bundle-demo
 NODE="$CLUSTER-control-plane"
 NETWORK=offline-bundle-target
@@ -56,7 +65,7 @@ ensure_image() {
 signing_tool() {
     docker run --rm --network none --user "$(id -u):$(id -g)" \
         --env COSIGN_PASSWORD --env HOME=/tmp \
-        --mount "type=bind,src=$DEMO_DIR/keys,dst=/keys" \
+        --mount "type=bind,src=$SIGNING_DIR,dst=/keys" \
         --mount "type=bind,src=$1,dst=/bundle" --workdir /keys \
         "$COSIGN" "${@:2}"
 }

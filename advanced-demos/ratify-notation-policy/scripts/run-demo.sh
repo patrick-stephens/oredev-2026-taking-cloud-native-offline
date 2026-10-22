@@ -140,7 +140,12 @@ docker network connect "$INTERNAL" "$NODE"
 docker exec "$NODE" mkdir -p "/etc/containerd/certs.d/$ENDPOINT"
 printf 'server = "http://%s"\n[host."http://%s"]\n  capabilities = ["pull", "resolve"]\n' \
   "$ENDPOINT" "$ENDPOINT" | docker exec -i "$NODE" tee "/etc/containerd/certs.d/$ENDPOINT/hosts.toml" >/dev/null
-kind load docker-image --name "$CLUSTER" "$PROBE_IMAGE" "$ROUTER_IMAGE"
+load_amd64_images() {
+  local archive="$STATE/kind-images-amd64.tar"
+  docker image save --platform linux/amd64 --output "$archive" "$@"
+  kind load image-archive "$archive" --name "$CLUSTER"
+}
+load_amd64_images "$PROBE_IMAGE" "$ROUTER_IMAGE"
 k apply -f - <"$ROOT/manifests/kube-router.yaml"
 k -n kube-system rollout status daemonset/offline-network-policy --timeout=120s
 for namespace in gatekeeper-system offline-demo diagnostics; do
@@ -169,7 +174,7 @@ for image in "${policy_images[@]}"; do
   [[ ${image##*/} == *:* && $image != *:latest ]] || fail "Unpinned policy image: $image"
   ensure_image "$image"
 done
-kind load docker-image --name "$CLUSTER" "${policy_images[@]}"
+load_amd64_images "${policy_images[@]}"
 helm install gatekeeper "$STATE/gatekeeper-$GATEKEEPER_CHART_VERSION.tgz" \
   -n gatekeeper-system -f "$ROOT/config/gatekeeper-values.yaml" --wait --timeout 5m
 helm install ratify "$STATE/ratify.tgz" -n gatekeeper-system \

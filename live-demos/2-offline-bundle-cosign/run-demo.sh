@@ -28,7 +28,7 @@ advance
 "$DEMO_DIR/scripts/prepare-target.sh"
 advance
 if [[ ${1:-} == --tamper ]]; then
-    if "$DEMO_DIR/scripts/verify-import.sh" --trusted-key "$DEMO_DIR/keys/cosign.pub" --tamper; then
+    if "$DEMO_DIR/scripts/verify-import.sh" --trusted-key "$COSIGN_PUB" --tamper; then
         die "Tampered image unexpectedly passed verification."
     else
         [[ $? == 42 ]] || die "Negative test failed for a reason other than detected tampering."
@@ -36,5 +36,5 @@ if [[ ${1:-} == --tamper ]]; then
         advance
     fi
 fi
-"$DEMO_DIR/scripts/verify-import.sh" --trusted-key "$DEMO_DIR/keys/cosign.pub"
+"$DEMO_DIR/scripts/verify-import.sh" --trusted-key "$COSIGN_PUB"
 advance

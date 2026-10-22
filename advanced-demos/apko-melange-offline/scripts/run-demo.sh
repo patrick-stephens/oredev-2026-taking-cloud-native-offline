@@ -96,7 +96,9 @@ connected_phase() {
     docker pull "$ALPINE_IMAGE"
     docker pull "$NGINX_IMAGE"
     docker pull "$PAUSE_IMAGE"
+    docker image tag "$PAUSE_IMAGE" "$PAUSE_IMAGE_TAG"
     docker pull "$ZOT_IMAGE"
+    docker pull "$SKOPEO_IMAGE"
     docker pull "$K3S_IMAGE"
     docker pull "$K3D_TOOLS_IMAGE"
     docker pull "$K3D_PROXY_IMAGE"
@@ -321,26 +323,29 @@ start_cluster() {
 }
 
 push_to_zot() {
-    local node="k3d-${CLUSTER_NAME}-server-0"
     local registry_image="zot:5000/${IMAGE_TAG#*/}"
-    local ctr=(ctr --address /run/k3s/containerd/containerd.sock --namespace k8s.io)
     docker save "$IMAGE_TAG" --output "$ARTIFACTS/local-image.tar"
-    docker cp "$ARTIFACTS/local-image.tar" "$node:/tmp/local-image.tar"
-    docker exec "$node" "${ctr[@]}" images import /tmp/local-image.tar
-    docker exec "$node" "${ctr[@]}" images tag "$IMAGE_TAG" "$registry_image"
-    docker exec "$node" "${ctr[@]}" images push --plain-http "$registry_image"
+    docker run --pull=never --rm --network "$DOCKER_NETWORK" \
+        --volume "$ARTIFACTS/local-image.tar:/tmp/local-image.tar:ro" \
+        --entrypoint skopeo "$SKOPEO_IMAGE" copy \
+        --dest-tls-verify=false --format oci \
+        docker-archive:/tmp/local-image.tar "docker://$registry_image"
     curl --fail --silent \
         "http://$ZOT_IP:5000/v2/offline/offline-go-server/tags/list" |
         grep -Fq "\"${IMAGE_TAG##*:}\"" || {
             echo 'The image tag is missing from zot after the internal push.' >&2
             exit 1
         }
-    docker exec "$node" "${ctr[@]}" images rm "$IMAGE_TAG" "$registry_image"
-    docker exec "$node" rm -f /tmp/local-image.tar
 }
 
 preload_pause_image() {
-    "$TOOLS/k3d" image import "$PAUSE_IMAGE_TAG" --cluster "$CLUSTER_NAME"
+    local node="k3d-${CLUSTER_NAME}-server-0"
+    local archive="$STATE/pause-amd64.tar"
+    docker image save --platform linux/amd64 --output "$archive" "$PAUSE_IMAGE_TAG"
+    docker cp "$archive" "$node:/tmp/pause-amd64.tar"
+    docker exec "$node" ctr --address /run/k3s/containerd/containerd.sock \
+        --namespace k8s.io images import /tmp/pause-amd64.tar
+    docker exec "$node" rm -f /tmp/pause-amd64.tar
 }
 
 deploy_and_verify() {

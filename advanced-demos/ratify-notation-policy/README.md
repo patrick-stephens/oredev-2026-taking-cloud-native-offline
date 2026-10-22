@@ -61,6 +61,9 @@ The node keeps its original Docker network attachment so its advertised
 control-plane IP does not disappear. **Its firewall and missing default route,
 not an assertion that both networks are internal, isolate the node.** The host
 firewall, Docker daemon configuration and unrelated networks are not changed.
+Images staged into kind are exported as explicit `linux/amd64` archives; this
+avoids asking a containerd-backed Docker image store to export unmaterialized
+platforms from multi-platform image indexes.
 
 ## Prerequisites
 
