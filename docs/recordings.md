@@ -60,6 +60,14 @@ remain self-contained.
 From the repository root, run these **sequentially**: the live demos both use
 port 5000. Allow extra time and disk for initial downloads and GIF rendering.
 Each run uses a 120-column, 36-row terminal.
+Recording mode executes selected inspection commands after the corresponding
+stage is ready, showing both the command and its real output. These include
+cache tags and network attachments, signed inventory and imported image,
+PostgreSQL pod/PVC and SQL results, and Zarf services, admitted image, SBOM
+summary and egress counters. Each inspection has a 30-second timeout and a
+three-second reading hold. Inspection failure fails the capture rather than
+publishing incomplete evidence. Normal live-demo runs still only print the
+presenter cues.
 
 ```bash
 bash scripts/record-demo.sh live-1
@@ -129,6 +137,11 @@ hold after the last output. Capture sets `DEMO_RECORDING=1`, which also holds
 each proof screen for three seconds before the next phase clears it; normal
 live demo pacing is unchanged.
 
+Inspection output is captured directly into `raw.cast`, preserved in
+`demo.cast`, and rendered from that same cast into `demo.mp4`; it is not added
+as separate narration or an MP4-only overlay. Existing recordings must be
+recaptured to include it; `--export` cannot add output to an older cast.
+
 ## Privacy and validation
 
 New output directories/files are owner-only. Recordings are gitignored except
@@ -154,17 +167,21 @@ not a substitute for watching the result on your talk setup.
 ### Capture validation on 2026-11-02
 
 All three full demos completed successfully on Linux amd64 with Docker 29.9.2,
-using the recording tool versions above. Generated local takes:
+using the recording tool versions above. The refreshed captures include executed
+stage inspections and their output in both formats:
 
 | Demo | Duration | Chapters | MP4 size |
 |------|----------|----------|----------|
-| LIVE-1 | 23.7 seconds | 7 | 1.1 MiB |
-| LIVE-2, including tamper rejection | 79.0 seconds | 9 | 1.1 MiB |
-| Zarf lifecycle, including fresh offline init | 215.4 seconds | 12 | 8.8 MiB |
+| LIVE-1 | 51.9 seconds | 7 | 3.0 MiB |
+| LIVE-2, including tamper rejection | 118.6 seconds | 9 | 3.7 MiB |
+| Zarf lifecycle, including fresh offline init | 235.2 seconds | 12 | 10.4 MiB |
 
 These are complete real-time terminal videos, not narrated screen recordings.
 LIVE-1 used a retained warm cache; tools and infrastructure images were staged.
 Each MP4 decoded successfully with FFmpeg, with 1470x1036 H.264/yuv420p output,
-matching cast markers and chapter endpoints within 0.1 seconds of video duration.
-Representative proof frames were visually checked. Demo containers/clusters
-were cleaned up; unrelated Docker builders remained running.
+matching cast markers and chapter endpoints within 0.15 seconds of video duration.
+The casts preserve the raw terminal output exactly, including 9, 12 and 15
+executed inspection commands respectively. Representative command/output proof
+frames were visually checked and captures were checked for private signing
+material. Demo containers/clusters were cleaned up and the pre-test Docker
+container/network inventory was restored.

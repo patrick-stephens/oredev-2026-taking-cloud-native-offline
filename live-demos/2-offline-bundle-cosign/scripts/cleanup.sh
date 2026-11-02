@@ -30,3 +30,6 @@ if docker network inspect "$NETWORK" >/dev/null 2>&1; then
     docker network rm "$NETWORK" >/dev/null
 fi
 printf 'CLEAN: target removed; bundle and signing keys retained locally.\n'
+record_commands \
+    "docker ps -a --filter label=offline-bundle-demo=true --format '{{.Names}} {{.Status}}'" \
+    "docker network ls --filter label=offline-bundle-demo=true"

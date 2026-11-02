@@ -3,45 +3,45 @@ title=live-2 - Taking cloud-native offline
 [CHAPTER]
 TIMEBASE=1/1000
 START=0
-END=11957
+END=19127
 title=1 / CONNECTED: package our chart, pull PostgreSQL, sign the complete inventory
 [CHAPTER]
 TIMEBASE=1/1000
-START=11957
-END=42876
+START=19127
+END=56388
 title=2 / TARGET: provision Kubernetes, then cut its internet route
 [CHAPTER]
 TIMEBASE=1/1000
-START=42876
-END=49542
+START=56388
+END=62393
 title=3 / AIR GAP: receive the archive and verify its signed inventory
 [CHAPTER]
 TIMEBASE=1/1000
-START=49542
-END=52705
+START=62393
+END=65593
 title=PASS: tampered image rejected before import or deployment.
 [CHAPTER]
 TIMEBASE=1/1000
-START=52705
-END=57542
+START=65593
+END=80283
 title=3 / AIR GAP: receive the archive and verify its signed inventory
 [CHAPTER]
 TIMEBASE=1/1000
-START=57542
-END=62578
+START=80283
+END=87236
 title=4 / IMPORT: start a local-only zot and load the verified image
 [CHAPTER]
 TIMEBASE=1/1000
-START=62578
-END=75099
+START=87236
+END=108681
 title=5 / DEPLOY: local Helm chart, verified digest, no external pulls
 [CHAPTER]
 TIMEBASE=1/1000
-START=75099
-END=75965
+START=108681
+END=115589
 title=6 / CLEANUP: remove the disposable air-gapped target
 [CHAPTER]
 TIMEBASE=1/1000
-START=75965
-END=78965
+START=115589
+END=118589
 title=RECORDING COMPLETE: live-2 succeeded, including demo-scoped cleanup.

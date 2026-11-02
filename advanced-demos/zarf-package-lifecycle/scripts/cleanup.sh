@@ -13,3 +13,6 @@ if docker container inspect "$NODE" >/dev/null 2>&1; then
 fi
 if [[ -f "$STATE/node-id" ]]; then rm -- "$STATE/node-id"; fi
 printf 'CLEAN: no host firewall rules or default kubeconfig were changed.\n'
+record_commands \
+    "docker ps -a --filter name='$NODE' --format '{{.Names}} {{.Status}}'" \
+    "docker network ls --filter name=k3d-zarf-lifecycle"

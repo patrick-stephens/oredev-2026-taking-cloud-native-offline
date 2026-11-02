@@ -20,4 +20,7 @@ set_registry_mode online
 printf 'Docker target platform: %s\n' "$DEMO_PLATFORM"
 printf 'READY: %s/v2/\n' "$HOST_CACHE_URL"
 printf 'Persistent storage: Docker volume mounted at /var/lib/zot\n'
+record_commands \
+	"curl --noproxy '*' -fsS --max-time 5 '$HOST_CACHE_URL/v2/'" \
+	"docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' ps"
 printf 'Next: ./scripts/prime-cache.sh\n'

@@ -85,6 +85,8 @@ interrupt. The cache volume and downloaded images are retained.
 
 Each stage also prints copyable, read-only commands to inspect zot readiness,
 cached tags and blobs, the isolated client network, and cleanup state.
+The repository recording runner executes selected inspections after each stage
+is ready and captures the commands and output in both asciinema and MP4.
 
 Run each command when ready to advance your narration. Each phase clears an
 interactive terminal and prints a banner; redirected/non-interactive output

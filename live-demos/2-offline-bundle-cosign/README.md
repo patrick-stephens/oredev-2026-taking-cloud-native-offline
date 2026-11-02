@@ -125,6 +125,8 @@ then cleans them again on exit. For an unattended rehearsal:
 
 Each stage prints copyable, read-only commands to inspect the signed bundle,
 target routes, imported registry digest, Kubernetes pod/PVC state, and SQL result.
+The repository recording runner executes selected inspections after each stage
+is ready and captures the commands and output in both asciinema and MP4.
 
 ```bash
 time DEMO_AUTO_ADVANCE=1 ./run-demo.sh --tamper

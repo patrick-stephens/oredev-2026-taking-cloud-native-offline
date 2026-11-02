@@ -3,35 +3,35 @@ title=live-1 - Taking cloud-native offline
 [CHAPTER]
 TIMEBASE=1/1000
 START=0
-END=6619
-title=1 / START: pull-through registry on localhost:5000
+END=12588
+title=1 / START: pull-through registry on 127.0.0.1:5000
 [CHAPTER]
 TIMEBASE=1/1000
-START=6619
-END=10804
+START=12588
+END=23350
 title=2 / PRIME: request nginx:latest THROUGH zot
 [CHAPTER]
 TIMEBASE=1/1000
-START=10804
-END=12948
+START=23350
+END=25745
 title=3 / OFFLINE: cut internet for BOTH zot and its pull client
 [CHAPTER]
 TIMEBASE=1/1000
-START=12948
-END=15950
+START=25745
+END=34981
 title=EXPECTED FAILURE: direct Docker Hub access is unavailable.
 [CHAPTER]
 TIMEBASE=1/1000
-START=15950
-END=19963
+START=34981
+END=42246
 title=4 / CACHE HIT: pull ALL nginx layers with no internet
 [CHAPTER]
 TIMEBASE=1/1000
-START=19963
-END=20694
+START=42246
+END=48887
 title=5 / STOP: clean up the demo
 [CHAPTER]
 TIMEBASE=1/1000
-START=20694
-END=23694
+START=48887
+END=51887
 title=RECORDING COMPLETE: live-1 succeeded, including demo-scoped cleanup.

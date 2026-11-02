@@ -1,9 +1,9 @@
 00:00:00  1 / CONNECTED: package our chart, pull PostgreSQL, sign the complete inventory
-00:00:11  2 / TARGET: provision Kubernetes, then cut its internet route
-00:00:42  3 / AIR GAP: receive the archive and verify its signed inventory
-00:00:49  PASS: tampered image rejected before import or deployment.
-00:00:52  3 / AIR GAP: receive the archive and verify its signed inventory
-00:00:57  4 / IMPORT: start a local-only zot and load the verified image
-00:01:02  5 / DEPLOY: local Helm chart, verified digest, no external pulls
-00:01:15  6 / CLEANUP: remove the disposable air-gapped target
-00:01:15  RECORDING COMPLETE: live-2 succeeded, including demo-scoped cleanup.
+00:00:19  2 / TARGET: provision Kubernetes, then cut its internet route
+00:00:56  3 / AIR GAP: receive the archive and verify its signed inventory
+00:01:02  PASS: tampered image rejected before import or deployment.
+00:01:05  3 / AIR GAP: receive the archive and verify its signed inventory
+00:01:20  4 / IMPORT: start a local-only zot and load the verified image
+00:01:27  5 / DEPLOY: local Helm chart, verified digest, no external pulls
+00:01:48  6 / CLEANUP: remove the disposable air-gapped target
+00:01:55  RECORDING COMPLETE: live-2 succeeded, including demo-scoped cleanup.

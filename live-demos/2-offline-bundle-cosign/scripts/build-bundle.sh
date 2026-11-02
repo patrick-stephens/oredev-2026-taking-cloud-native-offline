@@ -80,3 +80,6 @@ printf 'TRUST OUT OF BAND: copy %s separately to the target.\n' "$COSIGN_PUB"
 sha256sum "$COSIGN_PUB"
 jq '{image,chart,authenticatedFiles:(.files|length)}' "$work/metadata.json"
 printf 'Show the signed bundle inventory with: jq . <(tar -xzOf bundle.tar.gz metadata.json)\n'
+record_commands \
+    "tar -xzOf '$DEMO_DIR/bundle.tar.gz' metadata.json | jq '{platform,image,chart,authenticatedFiles:(.files|length)}'" \
+    "sha256sum '$DEMO_DIR/bundle.tar.gz' '$COSIGN_PUB'"

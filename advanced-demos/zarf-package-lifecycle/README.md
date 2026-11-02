@@ -99,6 +99,9 @@ online deploy.
 
 Each phase prints copyable, read-only commands to inspect the staged package,
 node routes, egress counters, Zarf services, workload, SBOM, and local Git source.
+The repository recording runner executes selected inspections after each phase
+is ready and captures the commands and output in both asciinema and MP4.
+Private init/deployment logs and credentials are not included.
 
 The two phases can also be run separately:
 

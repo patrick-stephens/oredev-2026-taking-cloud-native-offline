@@ -106,6 +106,9 @@ printf 'VERIFIED: all chart, values, public-key and image files match the signed
 show_commands \
     "jq '{platform,image,chart,authenticatedFiles:(.files|length)}' '$payload/metadata.json'" \
     "sha256sum '$payload/images/postgres/manifest.json'"
+record_commands \
+    "jq '{platform,image,chart,authenticatedFiles:(.files|length)}' '$payload/metadata.json'" \
+    "sha256sum '$payload/images/postgres/manifest.json'"
 
 advance
 banner "4 / IMPORT: start a local-only zot and load the verified image"
@@ -158,6 +161,8 @@ imported="$(docker run --rm --network "container:$NODE" "$SKOPEO" \
     --command-timeout 10s inspect --raw --tls-verify=false "docker://localhost:5001/postgres:$POSTGRES_TAG" | sha256sum)"
 [[ "sha256:${imported%% *}" == "$digest" ]] || die "Registry manifest digest differs after import."
 printf 'IMPORTED: localhost:5001/postgres:%s (%s)\n' "$POSTGRES_TAG" "$digest"
+record_commands \
+    "docker exec '$NODE' curl --noproxy '*' -fsS --max-time 5 http://localhost:5001/v2/postgres/tags/list | jq ."
 
 advance
 banner "5 / DEPLOY: local Helm chart, verified digest, no external pulls"
@@ -220,3 +225,7 @@ printf '\nPASS: signature, every payload hash and imported image digest verified
 printf 'PASS: Helm deployed official PostgreSQL by authenticated digest; pod is Running/Ready, PVC Bound.\n'
 printf 'PASS: psql authenticated over TCP using the existing Secret; SQL returned demo|demo|1.\n'
 printf 'PASS: target still has no IPv4/IPv6 default route.\n'
+record_commands \
+    "docker exec '$NODE' kubectl --kubeconfig /etc/kubernetes/admin.conf -n offline-bundle get pods,pvc -o wide" \
+    "docker exec '$NODE' kubectl --kubeconfig /etc/kubernetes/admin.conf -n offline-bundle get pod offline-postgresql-0 -o jsonpath='{.spec.containers[0].image}'" \
+    "docker exec '$NODE' kubectl --kubeconfig /etc/kubernetes/admin.conf -n offline-bundle exec statefulset/offline-postgresql -- sh -ec 'export PGPASSWORD=\"\$POSTGRES_PASSWORD\" PGCONNECT_TIMEOUT=5; psql --host=127.0.0.1 --username=\"\$POSTGRES_USER\" --dbname=\"\$POSTGRES_DB\" --no-password --tuples-only --no-align --command=\"SELECT current_database(), current_user, 1;\"'"

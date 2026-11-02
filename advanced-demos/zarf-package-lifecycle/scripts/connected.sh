@@ -161,3 +161,6 @@ show_commands \
     "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes,pods -A -o wide" \
     "docker exec '$NODE' ip -4 route show default"
 printf 'CONNECTED COMPLETE: both application and init archives are staged locally.\n'
+record_commands \
+    "'$TOOLS/zarf' package verify '$ARTIFACTS/$PACKAGE' --key '$KEYS/cosign.pub' --no-color" \
+    "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes,pods -A -o wide"

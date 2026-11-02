@@ -23,3 +23,6 @@ if [[ ${1:-} == --purge ]]; then
 else
     printf 'STOPPED: containers/networks removed; cached images retained for the next run.\n'
 fi
+record_commands \
+    "docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' ps -a" \
+    "docker volume ls --filter label=com.docker.compose.project=offline-cache-demo"

@@ -61,7 +61,8 @@ provisioning for your OS. It is a plan, not a compatibility check.
 ## Presentation fallback recordings
 
 Capture both live demos and the Zarf lifecycle demo as local asciinema recordings
-and full MP4 videos with narration chapters:
+and full MP4 videos with narration chapters. Both formats include executed
+stage-inspection commands and their output:
 
 ```bash
 bash scripts/record-demo.sh live-1

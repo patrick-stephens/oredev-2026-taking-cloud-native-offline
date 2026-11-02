@@ -33,4 +33,7 @@ timeout 20s "${COMPOSE[@]}" run --rm --no-deps -T --interactive=false --entrypoi
          printf "\nBlob storage size:\n"
          du -sh /cache'
 printf '\nPRIMED: manifests and layer blobs are stored locally.\n'
+record_commands \
+    "curl --noproxy '*' -fsS --max-time 5 '$HOST_CACHE_URL/v2/nginx/tags/list' | jq ." \
+    "docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' run --rm --no-deps -T --interactive=false --entrypoint /bin/sh skopeo -ec 'printf \"Stored blobs: \"; find /cache/nginx/blobs -type f | wc -l; du -sh /cache'"
 printf 'Next: ./scripts/verify-cache.sh\n'

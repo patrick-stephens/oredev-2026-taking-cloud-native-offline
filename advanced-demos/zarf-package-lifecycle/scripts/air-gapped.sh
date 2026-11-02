@@ -27,6 +27,9 @@ fi
 grep -Eq 'refused|unreachable|timed out' "$STATE/probe.log" ||
     die "External probe failed for an unexpected reason; inspect .state/probe.log."
 printf 'PROVED: external HTTP blocked; egress firewall covers node OUTPUT and pod FORWARD.\n'
+record_commands \
+    "docker exec '$NODE' iptables -t mangle -nvxL ZARF_DEMO_EGRESS" \
+    "docker exec '$NODE' ip6tables -t mangle -nvxL ZARF_DEMO_EGRESS"
 audit_egress > "$ARTIFACTS/egress-before.txt"
 docker exec "$NODE" iptables -t mangle -Z ZARF_DEMO_EGRESS
 docker exec "$NODE" ip6tables -t mangle -Z ZARF_DEMO_EGRESS
@@ -37,6 +40,8 @@ target_zarf package verify "/work/artifacts/$PACKAGE" --key /work/trust/cosign.p
     > "$STATE/verify.log" 2>&1 ||
     die "Package signature/integrity verification failed before init. See .state/verify.log."
 printf 'VERIFIED: package signature and integrity using the independently trusted public key, offline.\n'
+record_commands \
+    "docker exec '$NODE' /work/.tools/zarf-target package verify '/work/artifacts/$PACKAGE' --key /work/trust/cosign.pub --no-color"
 show_commands \
     "docker exec '$NODE' /work/.tools/zarf-target package verify '/work/artifacts/$PACKAGE' --key /work/trust/cosign.pub --no-color" \
     "docker exec '$NODE' iptables -t mangle -nvxL ZARF_DEMO_EGRESS"
@@ -53,13 +58,16 @@ else
         die "Offline init failed. Private diagnostic log: .state/init.log (may contain credentials)."
 fi
 printf 'INITIALIZED: registry, mutating agent and local Gitea are running.\n'
+record_commands \
+    "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n zarf get pods -o wide" \
+    "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n zarf get pvc"
 show_commands \
     "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n zarf get pods -o wide" \
     "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n zarf get pvc"
 
 phase "PHASE 4: AIR-GAPPED - deploy the complete package"
 show_commands \
-    "docker exec '$NODE' /work/.tools/zarf-target package deploy '/work/artifacts/$PACKAGE' --confirm --verify=always --key /work/trust/cosign.pub --no-color" \
+    "docker exec -e KUBECONFIG=/etc/rancher/k3s/k3s.yaml '$NODE' /work/.tools/zarf-target package deploy '/work/artifacts/$PACKAGE' --confirm --verify=always --key /work/trust/cosign.pub --no-color" \
     "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n podinfo get pods -o wide" \
     "docker exec '$NODE' iptables -t mangle -nvxL ZARF_DEMO_EGRESS"
 target_zarf package deploy "/work/artifacts/$PACKAGE" --confirm --timeout 180s \
@@ -105,6 +113,12 @@ for family in iptables ip6tables; do
 done
 printf 'PASS: pod Running, local registry seeded, package listed, SBOM recovered offline.\n'
 printf 'PASS: no forbidden node/pod egress attempts during init, deploy or verification.\n'
+record_commands \
+    "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n podinfo get pods -o wide" \
+    "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n podinfo get pods -o jsonpath='{.items[0].spec.containers[0].image}'" \
+    "docker exec -e KUBECONFIG=/etc/rancher/k3s/k3s.yaml '$NODE' /work/.tools/zarf-target package list --no-color" \
+    "jq '{packages:(.artifacts|length)}' '$sbom'" \
+    "docker exec '$NODE' iptables -t mangle -nvxL ZARF_DEMO_EGRESS"
 # A deliberate negative control AFTER the zero-attempt lifecycle measurement.
 if kube -n podinfo exec deployment/podinfo -- wget -T 3 -O /dev/null http://1.1.1.1 \
     > "$STATE/pod-probe.log" 2>&1; then
@@ -114,7 +128,9 @@ grep -Eq 'refused|unreachable|timed out' "$STATE/pod-probe.log" ||
     die "Pod probe failed for an unexpected reason; inspect .state/pod-probe.log."
 audit_egress > "$ARTIFACTS/egress-deliberate-pod-probe.txt"
 printf 'PROVED: deliberate external HTTP from the running pod is blocked too.\n'
+record_commands \
+    "docker exec '$NODE' iptables -t mangle -nvxL ZARF_DEMO_EGRESS"
 show_commands \
     "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n podinfo get pods -o wide" \
-    "docker exec '$NODE' /work/.tools/zarf-target package list --no-color" \
+    "docker exec -e KUBECONFIG=/etc/rancher/k3s/k3s.yaml '$NODE' /work/.tools/zarf-target package list --no-color" \
     "docker exec '$NODE' ip6tables -t mangle -nvxL ZARF_DEMO_EGRESS"

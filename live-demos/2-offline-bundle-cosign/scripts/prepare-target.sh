@@ -36,3 +36,6 @@ show_commands \
     "docker exec '$NODE' ip -4 route show default" \
     "docker inspect --format '{{json .NetworkSettings.Networks}}' '$NODE'"
 printf 'Infrastructure is pre-staged; all following supply-chain steps are offline.\n'
+record_commands \
+    "docker exec '$NODE' kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes -o wide" \
+    "docker exec '$NODE' sh -ec 'ip -4 route show default; ip -6 route show default'"

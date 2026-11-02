@@ -20,7 +20,7 @@ require_tools
 show_commands \
     "docker network ls --filter label=com.docker.compose.project=offline-cache-demo --format '{{.Name}} {{.Labels}}'" \
     "docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' run --rm --no-deps -T --interactive=false skopeo --command-timeout 8s inspect --raw docker://docker.io/library/nginx:latest" \
-    "curl --noproxy '*' -fsS '$HOST_CACHE_URL/v2/nginx/tags/list' | jq ."
+    "docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' run --rm --no-deps -T --interactive=false skopeo --command-timeout 10s list-tags --tls-verify=false docker://localhost:5000/nginx | jq ."
 id="$(registry_id)"
 network="$(uplink_name "$id")"
 ensure_online "$id" "$network"
@@ -78,6 +78,9 @@ else
         <<<"$failure" || die "Hub failed, but not with a recognized network error."
 fi
 printf 'EXPECTED FAILURE: direct Docker Hub access is unavailable.\n'
+record_commands \
+    "docker inspect '$id' --format '{{json .NetworkSettings.Networks}}' | jq 'keys'" \
+    "docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' run --rm --no-deps -T --interactive=false skopeo --command-timeout 10s list-tags --tls-verify=false docker://localhost:5000/nginx | jq ."
 
 if [[ -t 0 && -t 1 && ${DEMO_AUTO_ADVANCE:-0} != 1 ]]; then
     read -r -p 'Press Enter to clear the screen and pull from the offline cache... ' ||
@@ -98,4 +101,6 @@ actual="$(printf '%s' "$offline_manifest" | sha256sum | cut -d ' ' -f 1)"
 printf '\nPASS: a fresh client copied every layer from localhost:5000 in %ss (<15s).\n' "$elapsed"
 printf 'PASS: online/offline manifest SHA-256 matches: %s\n' "$actual"
 printf 'PASS: registry API remained reachable inside the isolated client namespace.\n'
+record_commands \
+    "docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' run --rm --no-deps -T --interactive=false skopeo --command-timeout 10s inspect --raw --tls-verify=false docker://localhost:5000/nginx:latest | sha256sum"
 printf 'Next: ./scripts/stop-cache.sh\n'

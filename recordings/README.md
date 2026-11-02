@@ -5,6 +5,11 @@ output without executing commands or starting the demos. Once the files and
 player are on your machine, no internet connection, Docker or Kubernetes is
 needed. There is no audio.
 
+Updated captures include the executed stage-inspection commands and their
+output in both the terminal recording and MP4. Read-only evidence is shown
+after the relevant stage is ready, with short holds for reading. Playback
+does not rerun those commands.
+
 ## Install the player on macOS
 
 With [Homebrew](https://brew.sh/) installed, run this while connected:
@@ -88,6 +93,10 @@ the embedded chapters. Check font size and readability on the actual projector
 before the talk.
 
 ## MacBook validation
+
+These playback checks used the earlier captures, before the stage-command
+output refresh. The refreshed files have Linux capture/render/decode validation;
+their MacBook playback has not been rerun.
 
 Tested on **2026-11-02**, on an Apple Silicon MacBook running **macOS 27.2
 (arm64)**. Installed the missing player with `brew install asciinema`, obtaining

@@ -13,6 +13,7 @@ test('preserves real output and timings and adds split-banner checkpoints', () =
     const events = [
         [0.1, 'o', '\x1b[H\x1b[2J\r\n=== PH'],
         [0.2, 'o', 'ASE 1: CONNECTED - package ===\r\n'],
+        [34, 'o', '$ printf "egress=blocked\\n"\r\negress=blocked\r\n'],
         [35, 'o', 'PROVED: external HTTP blocked.\r\n'],
         [40, 'o', 'RECORDING COMPLETE: adv-01 succeeded.\r\n'],
     ];
@@ -102,4 +103,40 @@ for (const [path, command, waits] of [
         assert.deepEqual([...result.stdout.matchAll(/WAIT:(\d+)/g)].map(match => match[1]), waits);
         assert.equal([...result.stdout.matchAll(/Test phase/g)].length, 2);
     });
+    test(`${path}: runs inspections only when sourced in recording mode`, () => {
+        for (const mode of ['0', '1']) {
+            const result = spawnSync('bash', ['-c', `
+                export DEMO_RECORDING="$2"
+                source "$1"
+                sleep() { :; }
+                record_commands 'printf "stage-evidence\\n"'
+            `, 'test', fileURLToPath(new URL(path, import.meta.url)), mode], { encoding: 'utf8' });
+            assert.equal(result.status, 0, result.stderr);
+            assert.equal(result.stdout.includes('stage-evidence\n'), mode === '1');
+        }
+    });
 }
+
+test('recording inspections include commands and output only in recording mode', () => {
+    const helper = fileURLToPath(new URL('./recording-inspect.sh', import.meta.url));
+    const result = spawnSync('bash', ['-c', `
+        source "$1"
+        sleep() { :; }
+        DEMO_RECORDING=0 record_commands 'printf SHOULD_NOT_RUN'
+        DEMO_RECORDING=1 record_commands 'printf "inspection-output\\n"'
+    `, 'test', helper], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /SHOULD_NOT_RUN/);
+    assert.match(result.stdout, /\$ printf "inspection-output\\n"\ninspection-output\n/);
+});
+
+test('recording inspections propagate failures, including failed pipelines', () => {
+    const helper = fileURLToPath(new URL('./recording-inspect.sh', import.meta.url));
+    for (const command of ['exit 7', 'false | cat']) {
+        const result = spawnSync('bash', ['-c', `
+            source "$1"
+            DEMO_RECORDING=1 record_commands "$2"
+        `, 'test', helper, command], { encoding: 'utf8' });
+        assert.equal(result.status, command === 'exit 7' ? 7 : 1, result.stderr);
+    }
+});

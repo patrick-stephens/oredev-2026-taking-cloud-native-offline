@@ -4,6 +4,10 @@
 set -euo pipefail
 
 DEMO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+record_commands() { :; }
+if [[ ${DEMO_RECORDING:-0} == 1 ]]; then
+    source "$DEMO_DIR/../../scripts/recording-inspect.sh"
+fi
 if [[ "$(uname -s)" == Darwin ]]; then
     homebrew_prefix="${HOMEBREW_PREFIX:-/opt/homebrew}"
     if [[ -x "$homebrew_prefix/bin/brew" ]]; then
