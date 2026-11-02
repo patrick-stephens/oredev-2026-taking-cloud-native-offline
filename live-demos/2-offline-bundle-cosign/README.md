@@ -85,10 +85,6 @@ silently change the deployed bytes. The digest takes precedence over
 - **Experimental macOS ARM:** use Docker Desktop's native Linux ARM64 engine.
   Install Homebrew Bash 4+, `coreutils`, `findutils`, `gawk`, `gnu-sed`,
   `gnu-tar`, `grep` and `jq`; expose their `gnubin` command paths.
-- This macOS path is experimental. On 2026-11-02, MacBook Neo smoke testing
-  passed for connected bundle creation and offline signature verification on
-  `linux/arm64`. Kind target isolation and deployment were not run on the shared
-  Mac host.
 - Bash 4+, GNU tar/coreutils (timeout, sha256sum, sort, stat, realpath), jq,
   awk and grep.
 - Native host **Helm 3.12+ or 4**, and **kind v0.31.0**. Preparation stages a
@@ -464,3 +460,21 @@ Additional checks passed:
   name or malformed digest.
 - Cleanup left no demo target containers; repeat cleanup succeeded.
 - The full `--tamper` flow passed in a real pseudo-terminal with clears/banners.
+
+## How this relates to Zarf 1.0
+
+Zarf's [roadmap](https://docs.zarf.dev/roadmap/) describes a stable package
+schema and a clearer compatibility baseline as foundational goals for 1.0.
+The `v1beta1` schema was released in Zarf **v0.89.0**; the maintainers say
+`v1alpha1` is planned for deprecation with the 1.0 release
+([deprecation timeline issue](https://github.com/zarf-dev/zarf/issues/5441)).
+The roadmap also covers package signing, verifiable init packages and
+documented offline verification.
+
+This demo illustrates related supply-chain principles—verify transported
+content before importing or deploying it, and obtain the trust key separately—
+but it does **not** create or deploy a Zarf package. It signs a SHA-256 file
+inventory with `cosign sign-blob` and an independently trusted public key;
+that is distinct from Zarf's Sigstore-compatible keyless workflows and its
+signed init-package distribution. Zarf v0.89.0 already ships init packages
+signed with keyless Sigstore signing.
