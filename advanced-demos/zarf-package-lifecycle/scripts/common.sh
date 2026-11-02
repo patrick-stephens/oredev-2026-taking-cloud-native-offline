@@ -17,6 +17,7 @@ KEYS="$DEMO_DIR/keys"
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 phase() {
+    if [[ ${DEMO_RECORDING:-0} == 1 ]]; then sleep 3; fi
     if [[ -t 1 && ${TERM:-dumb} != dumb ]]; then clear; fi
     printf '\n=== %s ===\n' "$1"
     sleep 1

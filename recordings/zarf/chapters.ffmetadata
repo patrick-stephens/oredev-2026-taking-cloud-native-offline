@@ -1,0 +1,62 @@
+;FFMETADATA1
+title=adv-01 - Taking cloud-native offline
+[CHAPTER]
+TIMEBASE=1/1000
+START=0
+END=89447
+title=PHASE 1: CONNECTED - stage tools, init package and workload package
+[CHAPTER]
+TIMEBASE=1/1000
+START=89447
+END=93769
+title=PHASE 2: AIR-GAPPED - block and prove node/pod egress
+[CHAPTER]
+TIMEBASE=1/1000
+START=93769
+END=94138
+title=PROVED: external HTTP blocked\; egress firewall covers node OUTPUT and pod FORWARD.
+[CHAPTER]
+TIMEBASE=1/1000
+START=94138
+END=97141
+title=VERIFIED: package signature and integrity using the independently trusted public key, offline.
+[CHAPTER]
+TIMEBASE=1/1000
+START=97141
+END=175727
+title=PHASE 3: AIR-GAPPED - Zarf injector bootstraps registry, agent and Git
+[CHAPTER]
+TIMEBASE=1/1000
+START=175727
+END=178729
+title=INITIALIZED: registry, mutating agent and local Gitea are running.
+[CHAPTER]
+TIMEBASE=1/1000
+START=178729
+END=202457
+title=PHASE 4: AIR-GAPPED - deploy the complete package
+[CHAPTER]
+TIMEBASE=1/1000
+START=202457
+END=204308
+title=BEFORE (packaged chart): ghcr.io/stefanprodan/podinfo:6.15.0
+[CHAPTER]
+TIMEBASE=1/1000
+START=204308
+END=207500
+title=PASS: no forbidden node/pod egress attempts during init, deploy or verification.
+[CHAPTER]
+TIMEBASE=1/1000
+START=207500
+END=210507
+title=PROVED: deliberate external HTTP from the running pod is blocked too.
+[CHAPTER]
+TIMEBASE=1/1000
+START=210507
+END=212413
+title=CLEANUP: remove the disposable cluster (and its firewall namespace)
+[CHAPTER]
+TIMEBASE=1/1000
+START=212413
+END=215413
+title=RECORDING COMPLETE: adv-01 succeeded, including demo-scoped cleanup.

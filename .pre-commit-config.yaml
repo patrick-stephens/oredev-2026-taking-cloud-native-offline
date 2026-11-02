@@ -14,6 +14,8 @@ repos:
     hooks:
       - id: check-added-large-files
         args: [--maxkb=1024]
+        # Reviewed offline presentation videos intentionally exceed 1 MiB.
+        exclude: ^recordings/(live-1|live-2|zarf)/demo\.mp4$
       - id: check-case-conflict
       - id: check-executables-have-shebangs
       - id: check-illegal-windows-names

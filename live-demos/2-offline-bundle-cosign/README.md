@@ -101,6 +101,10 @@ Docker, the node image and local tools remain part of the trusted computing base
 
 ## One command, one terminal
 
+For a full offline MP4 fallback and a chaptered asciinema capture, run
+`bash scripts/record-demo.sh live-2` from the repository root. This includes the
+tamper-rejection test; see the [recording guide](../../docs/recordings.md).
+
 From the repository root:
 
 ```bash
@@ -408,6 +412,11 @@ DEMO_AUTO_ADVANCE=1 ./run-demo.sh --tamper
 - **Uncatchable interruption:** run cleanup explicitly.
 
 ## Tested with
+
+Recording retest: **2026-11-02**, Docker 29.9.2 on Linux amd64, using
+asciinema 3.2.1, agg 1.9.0, FFmpeg 6.1.1 and Node.js 24.22.1. Full capture and MP4
+export passed, including tamper rejection, verified offline import, PostgreSQL
+checks and cleanup. The video is about 79 seconds with recording-only holds.
 
 Retest date: **2026-10-17**, native Linux amd64:
 

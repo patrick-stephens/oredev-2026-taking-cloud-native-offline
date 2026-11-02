@@ -1,0 +1,7 @@
+00:00:00  1 / START: pull-through registry on localhost:5000
+00:00:06  2 / PRIME: request nginx:latest THROUGH zot
+00:00:10  3 / OFFLINE: cut internet for BOTH zot and its pull client
+00:00:12  EXPECTED FAILURE: direct Docker Hub access is unavailable.
+00:00:15  4 / CACHE HIT: pull ALL nginx layers with no internet
+00:00:19  5 / STOP: clean up the demo
+00:00:20  RECORDING COMPLETE: live-1 succeeded, including demo-scoped cleanup.

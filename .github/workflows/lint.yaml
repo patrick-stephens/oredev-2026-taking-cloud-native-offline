@@ -11,6 +11,19 @@ permissions:
   contents: read
 
 jobs:
+  recording-tests:
+    name: Recording chapters and pacing
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: '24'
+      - name: Test recording metadata and opt-in demo pacing
+        run: node --test scripts/recording-chapters.test.mjs
+
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-24.04

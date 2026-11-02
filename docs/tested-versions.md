@@ -18,3 +18,5 @@ Contributors: append tested versions here **and** in the relevant demo README, i
 | ADV-10 — apko and melange offline | TBD | TBD | TBD | TBD |
 | ADV-11 — Harbor and Dragonfly preheat | TBD | TBD | TBD | TBD |
 | ADV-12 — Kubean lifecycle | TBD | TBD | TBD | TBD |
+| LIVE-1, LIVE-2, ADV-01 recordings | asciinema / agg | 3.2.1 / 1.9.0 | 2026-11-02 | Real unattended captures; local MP4 export with chapters |
+| LIVE-1, LIVE-2, ADV-01 recordings | FFmpeg / Node.js | 6.1.1 / 24.22.1 | 2026-11-02 | H.264/yuv420p decode and chapter timeline verified; Linux amd64, Docker 29.9.2 |

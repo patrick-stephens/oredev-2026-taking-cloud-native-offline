@@ -67,3 +67,22 @@ kind-config.yaml
 
 # Preserve this repository's existing local ggshield cache exclusion.
 .cache_ggshield
+
+# Keep only reviewed presentation fallbacks; ignore raw captures and setup takes.
+/recordings/*
+!/recordings/live-1/
+!/recordings/live-2/
+!/recordings/zarf/
+/recordings/*/*
+!/recordings/live-1/demo.mp4
+!/recordings/live-1/demo.cast
+!/recordings/live-1/chapters.txt
+!/recordings/live-1/chapters.ffmetadata
+!/recordings/live-2/demo.mp4
+!/recordings/live-2/demo.cast
+!/recordings/live-2/chapters.txt
+!/recordings/live-2/chapters.ffmetadata
+!/recordings/zarf/demo.mp4
+!/recordings/zarf/demo.cast
+!/recordings/zarf/chapters.txt
+!/recordings/zarf/chapters.ffmetadata

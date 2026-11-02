@@ -13,6 +13,7 @@ die() {
 }
 
 banner() {
+    if [[ ${DEMO_RECORDING:-0} == 1 ]]; then sleep 3; fi
     if [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
         clear
     fi

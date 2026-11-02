@@ -73,6 +73,10 @@ download consistency, not independent publisher identity.
 
 ## Run in one terminal
 
+For a full offline MP4 fallback and a chaptered asciinema capture, run
+`bash scripts/record-demo.sh adv-01` from the repository root. This also cleans
+up the cluster on success; see the [recording guide](../../docs/recordings.md).
+
 From the repository root:
 
 ```bash
@@ -311,6 +315,12 @@ Private failure logs stay in `.state/signing-*.log`, and firewall evidence is
 saved as `artifacts/signing-test-egress.txt`.
 
 ## Tested with
+
+Recording retest: **2026-11-02**, Docker 29.9.2 on Linux amd64, using
+asciinema 3.2.1, agg 1.9.0, FFmpeg 6.1.1 and Node.js 24.22.1. Full capture and MP4
+export passed, including offline signature verification, fresh-cluster init,
+deployment, zero forbidden lifecycle egress and cleanup. The video is about
+215 seconds with recording-only holds; private init/deploy logs stay private.
 
 Retest date: **2026-10-17**, native Linux amd64:
 

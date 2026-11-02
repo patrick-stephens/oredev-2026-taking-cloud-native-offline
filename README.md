@@ -49,6 +49,22 @@ combined with `--only`, `--skip`, and `--no-system-packages`. Use the output to
 adapt provisioning for your OS. It is a plan, not a compatibility check:
 downloaded binaries and demo images still target Linux amd64.
 
+## Presentation fallback recordings
+
+Capture both live demos and the Zarf lifecycle demo as local asciinema recordings
+and full MP4 videos with narration chapters:
+
+```bash
+bash scripts/record-demo.sh live-1
+bash scripts/record-demo.sh live-2
+bash scripts/record-demo.sh adv-01
+```
+
+See [recording and offline playback](docs/recordings.md) for recording-only tools,
+pause points, privacy checks and export recovery. Videos play without running
+the demos or accessing the internet. Reviewed fallbacks are included in
+[recordings/](recordings/); raw captures and setup takes stay gitignored.
+
 ## Cleanup
 
 Provisioning caches are stored in the individual demo directories; there is no

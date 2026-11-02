@@ -60,6 +60,10 @@ external network is disconnected. During isolation, the scripts reach
 
 ## Run the talk, in one terminal
 
+For a full offline MP4 fallback and a chaptered asciinema capture, run
+`bash scripts/record-demo.sh live-1` from the repository root. See the
+[recording guide](../../docs/recordings.md) for tools and narration pause points.
+
 From the repository root:
 
 ```bash
@@ -310,6 +314,11 @@ Disabling the container TTY alone leaves Compose's stdin open; under GNU
 These clients never need stdin; only the presenter's phase prompt reads it.
 
 ### Recorded end-to-end results
+
+Recording retest: **2026-11-02**, Docker 29.9.2 on Linux amd64, using
+asciinema 3.2.1, agg 1.9.0, FFmpeg 6.1.1 and Node.js 24.22.1. The full warm-cache
+capture and MP4 export passed, including upstream failure, fresh-client offline
+copy and cleanup. The video is about 24 seconds with recording-only holds.
 
 Retested on 2026-10-17 with a Linux amd64 Docker engine, Docker 29.9.1,
 Compose v5.6.0 and the pinned container tools above:
