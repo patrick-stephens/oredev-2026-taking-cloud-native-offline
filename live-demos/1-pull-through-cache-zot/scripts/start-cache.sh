@@ -6,15 +6,14 @@
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 
-banner "1 / START: pull-through registry on localhost:5000"
+banner "1 / START: pull-through registry on 127.0.0.1:$DEMO_HOST_PORT"
 require_tools
-[[ "$(docker info --format '{{.OSType}}/{{.Architecture}}')" == "linux/x86_64" ]] ||
-    die "This demo pins the linux/amd64 zot image; use an amd64 Linux Docker engine."
 
 # Pull missing tooling now, not after the simulated outage.
 timeout 120s "${COMPOSE[@]}" --profile tools pull --policy missing
 set_registry_mode online
 
-printf 'READY: http://localhost:5000/v2/\n'
+printf 'Docker target platform: %s\n' "$DEMO_PLATFORM"
+printf 'READY: %s/v2/\n' "$HOST_CACHE_URL"
 printf 'Persistent storage: Docker volume mounted at /var/lib/zot\n'
 printf 'Next: ./scripts/prime-cache.sh\n'

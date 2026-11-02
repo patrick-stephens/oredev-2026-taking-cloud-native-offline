@@ -22,7 +22,7 @@ network="$(uplink_name "$id")"
 ensure_online "$id" "$network"
 cache_ready
 if ! curl --noproxy '*' --fail --silent --show-error --max-time 5 \
-    http://localhost:5000/v2/nginx/tags/list |
+    "$HOST_CACHE_URL/v2/nginx/tags/list" |
     jq -e '.tags | index("latest") != null' >/dev/null; then
     die "nginx:latest is not cached. Run ./scripts/prime-cache.sh first."
 fi

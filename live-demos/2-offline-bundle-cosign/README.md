@@ -71,20 +71,29 @@ replace both payload and key. `--trusted-key` must come from an independent,
 authenticated channel. The wrapper models this with the original build-side
 public key, outside the archive.
 
-The build selects a version tag but records the **resolved linux/amd64 manifest
-digest**. Offline import preserves and checks that digest. Helm deploys
+The build selects a version tag but records the **resolved manifest digest for
+the target platform**. Offline import preserves and checks that digest. Helm deploys
 `localhost:5001/postgres@sha256:...`, not the tag; changing a registry tag cannot
 silently change the deployed bytes. The digest takes precedence over
 `image.tag` in the chart.
 
 ## Prerequisites and assumptions
 
-- Native **Linux amd64**, Docker access without sudo and privileged kind support;
-  at least 4 CPUs, 6 GiB available RAM and 6 GiB free disk.
+- A native Linux Docker engine matching the host architecture, Docker access
+  without sudo and privileged kind support; at least 4 CPUs, 6 GiB available
+  RAM and 6 GiB free disk.
+- **Experimental macOS ARM:** use Docker Desktop's native Linux ARM64 engine.
+  Install Homebrew Bash 4+, `coreutils`, `findutils`, `gawk`, `gnu-sed`,
+  `gnu-tar`, `grep` and `jq`; expose their `gnubin` command paths.
+- This macOS path is experimental. On 2026-11-02, MacBook Neo smoke testing
+  passed for connected bundle creation and offline signature verification on
+  `linux/arm64`. Kind target isolation and deployment were not run on the shared
+  Mac host.
 - Bash 4+, GNU tar/coreutils (timeout, sha256sum, sort, stat, realpath), jq,
   awk and grep.
-- Native standalone Linux amd64 **Helm 3.12+ or 4**, and **kind v0.31.0**.
-  Preparation copies Helm into the target; kubectl comes from the node image.
+- Native host **Helm 3.12+ or 4**, and **kind v0.31.0**. Preparation stages a
+  checksum-verified Linux Helm binary matching the target architecture inside
+  the node; kubectl comes from the node image.
 - Free **127.0.0.1:5001**, plus an automatically allocated loopback Kubernetes
   API port. Do not run concurrent copies of this demo.
 - Connected-side Docker Hub, GHCR and Quay access, without registry rate limits.
@@ -125,9 +134,10 @@ The wrapper enforces **under six minutes including cleanup**. Presenter pauses
 count. Pre-stage infrastructure images before the talk:
 
 ```bash
+target_arch=arm64 # macOS ARM; use amd64 on Linux x86_64.
 docker pull quay.io/skopeo/stable:v1.20.0
 docker pull ghcr.io/sigstore/cosign/cosign:v2.4.3
-docker pull ghcr.io/project-zot/zot-linux-amd64:v2.1.15
+docker pull "ghcr.io/project-zot/zot-linux-${target_arch}:v2.1.15"
 docker pull kindest/node:v1.35.0
 ```
 
@@ -144,9 +154,10 @@ Run these from this directory, in the same terminal.
 Equivalent application operations (the script containerizes Skopeo/Cosign):
 
 ```bash
+target_arch=arm64 # macOS ARM; use amd64 on Linux x86_64.
 helm lint chart -f values.yaml --strict
 helm package chart --destination charts
-skopeo copy --override-os linux --override-arch amd64 \
+skopeo copy --override-os linux --override-arch "$target_arch" \
   docker://docker.io/library/postgres:18.6-alpine3.23 dir:images/postgres
 cosign sign-blob --yes --tlog-upload=false --key .state/signing/cosign.key \
   --output-signature metadata.sig metadata.json

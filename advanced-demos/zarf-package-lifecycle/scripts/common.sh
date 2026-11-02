@@ -3,18 +3,52 @@
 # shellcheck disable=SC2034
 set -euo pipefail
 DEMO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "$(uname -s)" == Darwin ]]; then
+    homebrew_prefix="${HOMEBREW_PREFIX:-/opt/homebrew}"
+    if [[ -x "$homebrew_prefix/bin/brew" ]]; then
+        PATH="$HOME/.local/bin:$homebrew_prefix/bin:$PATH"
+        for formula in coreutils findutils gawk gnu-sed gnu-tar grep; do
+            gnubin="$homebrew_prefix/opt/$formula/libexec/gnubin"
+            [[ -d "$gnubin" ]] && PATH="$gnubin:$PATH"
+        done
+        export PATH
+    fi
+fi
 TOOLS="$DEMO_DIR/.tools"
 STATE="$DEMO_DIR/.state"
 ARTIFACTS="$DEMO_DIR/artifacts"
 CLUSTER=zarf-lifecycle
 NODE=k3d-zarf-lifecycle-server-0
-PACKAGE=zarf-package-podinfo-offline-amd64-6.15.0.tar.zst
-INIT=zarf-init-amd64-v0.88.0.tar.zst
+PACKAGE=""
+INIT=""
+DEMO_ARCH=""
+TARGET_PLATFORM=""
 NODE_IMAGE=rancher/k3s:v1.35.5-k3s1
 COSIGN=ghcr.io/sigstore/cosign/cosign:v2.4.3
 KEYS="$DEMO_DIR/keys"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+detect_target_platform() {
+    local engine_platform engine_arch host_os host_arch
+    engine_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
+    case "$engine_platform" in
+        linux/x86_64|linux/amd64) engine_arch=amd64 ;;
+        linux/aarch64|linux/arm64) engine_arch=arm64 ;;
+        *) die "Unsupported Docker engine platform: $engine_platform" ;;
+    esac
+    host_os="$(uname -s)"
+    host_arch="$(uname -m)"
+    case "$host_os/$host_arch/$engine_arch" in
+        Darwin/arm64/arm64|Linux/x86_64/amd64) ;;
+        *) die "Use Linux x86_64 or experimental macOS ARM with a matching Linux Docker engine." ;;
+    esac
+    DEMO_ARCH="$engine_arch"
+    TARGET_PLATFORM="linux/$DEMO_ARCH"
+    PACKAGE="zarf-package-podinfo-offline-$DEMO_ARCH-6.15.0.tar.zst"
+    INIT="zarf-init-$DEMO_ARCH-v0.88.0.tar.zst"
+    export DEMO_ARCH TARGET_PLATFORM
+}
 
 phase() {
     if [[ ${DEMO_RECORDING:-0} == 1 ]]; then sleep 3; fi
@@ -28,12 +62,11 @@ require_tools() {
     for tool in docker curl jq sha256sum awk grep sed timeout head base64 cmp realpath; do
         command -v "$tool" >/dev/null || die "Missing required tool: $tool"
     done
-    [[ "$(uname -s)/$(uname -m)" == Linux/x86_64 ]] || die "Use a Linux amd64 sandbox."
-    [[ "$(docker info --format '{{.OSType}}/{{.Architecture}}')" == linux/x86_64 ]] ||
-        die "Use a local Linux amd64 Docker engine."
+    detect_target_platform
     mkdir -p "$STATE" "$ARTIFACTS"
     chmod 700 "$STATE"
-    [[ -x "$TOOLS/zarf" && -x "$TOOLS/k3d" ]] || die "CONNECTED: run ./scripts/install-tools.sh first."
+    [[ -x "$TOOLS/zarf" && -x "$TOOLS/zarf-target" && -x "$TOOLS/k3d" ]] ||
+        die "CONNECTED: run ./scripts/install-tools.sh first."
     [[ "$("$TOOLS/zarf" version)" == v0.88.0 ]] || die "Expected Zarf v0.88.0."
     "$TOOLS/k3d" version | grep -Fxq 'k3d version v5.9.0' || die "Expected k3d v5.9.0."
 }
@@ -53,7 +86,7 @@ assert_private_keys_unmounted() {
 target_zarf() {
     docker exec --env KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
         --env ZARF_CACHE_PATH=/work/.state/target-cache \
-        --workdir /work/artifacts "$NODE" /work/.tools/zarf --no-color "$@"
+        --workdir /work/artifacts "$NODE" /work/.tools/zarf-target --no-color "$@"
 }
 
 kube() { docker exec "$NODE" /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml "$@"; }

@@ -2,6 +2,26 @@
 set -euo pipefail
 
 DEMO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "$(uname -s)" == Darwin ]]; then
+    homebrew_prefix="${HOMEBREW_PREFIX:-/opt/homebrew}"
+    if [[ -x "$homebrew_prefix/bin/brew" ]]; then
+        PATH="$HOME/.local/bin:$homebrew_prefix/bin:$PATH"
+        for formula in coreutils findutils gawk gnu-sed gnu-tar grep; do
+            gnubin="$homebrew_prefix/opt/$formula/libexec/gnubin"
+            [[ -d "$gnubin" ]] && PATH="$gnubin:$PATH"
+        done
+        export PATH
+    fi
+fi
+if [[ -z "${DEMO_HOST_PORT:-}" ]]; then
+    if [[ "$(uname -s)" == Darwin ]]; then
+        DEMO_HOST_PORT=5001
+    else
+        DEMO_HOST_PORT=5000
+    fi
+fi
+HOST_CACHE_URL="http://127.0.0.1:$DEMO_HOST_PORT"
+export DEMO_HOST_PORT
 COMPOSE=(docker compose --project-name offline-cache-demo --file "$DEMO_DIR/compose.yaml")
 # Shared by scripts that source this file.
 # shellcheck disable=SC2034
@@ -21,12 +41,21 @@ banner() {
 }
 
 require_tools() {
-    local tool
+    local tool engine_platform engine_arch
     for tool in docker curl jq timeout sha256sum cut grep; do
         command -v "$tool" >/dev/null || die "Install the required tool: $tool"
     done
     docker compose version >/dev/null
     docker info >/dev/null
+    engine_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
+    case "$engine_platform" in
+        linux/x86_64|linux/amd64) engine_arch=amd64 ;;
+        linux/aarch64|linux/arm64) engine_arch=arm64 ;;
+        *) die "Unsupported Docker engine platform: $engine_platform" ;;
+    esac
+    DEMO_ARCH="$engine_arch"
+    DEMO_PLATFORM="linux/$engine_arch"
+    export DEMO_ARCH DEMO_PLATFORM
 }
 
 registry_id() {
@@ -63,11 +92,13 @@ skopeo_run() {
 
 cache_ready() {
     curl --noproxy '*' --fail --silent --show-error --max-time 2 \
-        http://localhost:5000/v2/ >/dev/null
+    "$HOST_CACHE_URL/v2/" >/dev/null
 }
 
 set_registry_mode() {
-    local mode=$1 config="$DEMO_DIR/zot-config.json" id network attempt
+    local mode=$1 config="$DEMO_DIR/zot-config.json" id network attempt ready_attempts=30
+    # Docker Desktop can take longer to publish a newly started container port.
+    [[ "$(uname -s)" == Darwin ]] && ready_attempts=60
     if [[ "$mode" == offline ]]; then
         config="$DEMO_DIR/zot-offline-config.json"
     elif [[ "$mode" != online ]]; then
@@ -77,13 +108,13 @@ set_registry_mode() {
     id="$(registry_id)" || return
     network="$(uplink_name "$id")" || return
     ensure_online "$id" "$network" || return
-    for ((attempt = 0; attempt < 30; attempt++)); do
+    for ((attempt = 0; attempt < ready_attempts; attempt++)); do
         if cache_ready 2>/dev/null; then
             return 0
         fi
         sleep 1
     done
     "${COMPOSE[@]}" logs --tail 50 zot >&2
-    printf 'ERROR: zot did not become ready within 30 seconds (%s mode).\n' "$mode" >&2
+    printf 'ERROR: zot did not become ready within %s seconds (%s mode).\n' "$ready_attempts" "$mode" >&2
     return 1
 }

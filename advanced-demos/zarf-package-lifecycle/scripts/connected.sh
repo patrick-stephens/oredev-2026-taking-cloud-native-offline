@@ -55,8 +55,9 @@ if docker container inspect "$NODE" >/dev/null 2>&1; then
     assert_owned
     assert_private_keys_unmounted
 fi
-if ! docker image inspect "$COSIGN" >/dev/null 2>&1; then
-    timeout 120s docker pull --platform linux/amd64 "$COSIGN"
+cosign_platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$COSIGN" 2>/dev/null || true)"
+if [[ "$cosign_platform" != "$TARGET_PLATFORM" ]]; then
+    timeout 120s docker pull --platform "$TARGET_PLATFORM" "$COSIGN"
 fi
 mkdir -p "$KEYS"
 chmod 700 "$KEYS"
@@ -86,7 +87,7 @@ curl -fLsS --retry 3 --max-time 30 \
     grep " $INIT\$" checksums.txt | sha256sum --check -
 )
 ZARF_PACKAGE_CREATE_SIGNING_KEY_PASSWORD="$(<"$KEYS/password")" \
-    "$TOOLS/zarf" package create "$DEMO_DIR/zarf-config.yaml" --confirm \
+    "$TOOLS/zarf" --architecture "$DEMO_ARCH" package create "$DEMO_DIR/zarf-config.yaml" --confirm \
     --signing-key "$KEYS/cosign.key" --tlog-upload=false \
     --output "$ARTIFACTS" --cache "$STATE/cache" --no-color
 "$TOOLS/zarf" package verify "$ARTIFACTS/$PACKAGE" --key "$KEYS/cosign.pub" --no-color
@@ -105,9 +106,9 @@ for image in "$NODE_IMAGE" ghcr.io/k3d-io/k3d-tools:5.9.0; do
     if ! platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image" 2>/dev/null)"; then
         platform=absent
     fi
-    if [[ "$platform" != linux/amd64 ]]; then
-        printf 'STAGING: %s for linux/amd64 (cached platform: %s).\n' "$image" "${platform:-absent}"
-        timeout 180s docker pull --platform linux/amd64 "$image"
+    if [[ "$platform" != "$TARGET_PLATFORM" ]]; then
+        printf 'STAGING: %s for %s (cached platform: %s).\n' "$image" "$TARGET_PLATFORM" "${platform:-absent}"
+        timeout 180s docker pull --platform "$TARGET_PLATFORM" "$image"
     fi
 done
 if docker container inspect "$NODE" >/dev/null 2>&1; then

@@ -22,7 +22,7 @@ if ! kind get clusters | grep -Fxq "$CLUSTER"; then
     docker inspect --format '{{.Id}}' "$NODE" > "$STATE/node-id"
 fi
 assert_target_owned
-docker cp "$(realpath "$(command -v helm)")" "$NODE:/usr/local/bin/offline-demo-helm"
+docker cp "$(target_helm)" "$NODE:/usr/local/bin/offline-demo-helm"
 kube -n local-path-storage rollout status deployment/local-path-provisioner --timeout=60s
 kube get storageclasses -o json | jq -e '
     any(.items[]; .metadata.annotations["storageclass.kubernetes.io/is-default-class"] == "true")

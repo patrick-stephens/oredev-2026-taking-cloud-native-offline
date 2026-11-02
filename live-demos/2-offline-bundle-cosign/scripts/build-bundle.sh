@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Connected side, from live-demos/2-offline-bundle-cosign: ./scripts/build-bundle.sh
 # Equivalent image operation (containerized Skopeo below):
-# skopeo copy --override-os linux --override-arch amd64 \
+# skopeo copy --override-os linux --override-arch "$DEMO_ARCH" \
 #   docker://docker.io/library/postgres:18.6-alpine3.23 dir:images/postgres
 # helm lint chart --set auth.existingSecret=offline-postgresql-auth
 # helm package chart --destination charts
@@ -42,7 +42,7 @@ helm package "$DEMO_DIR/chart" --destination "$work/charts"
     die "Packaged chart version differs from the demo's pinned version."
 timeout 100s docker run --rm --user "$(id -u):$(id -g)" \
     --mount "type=bind,src=$work,dst=/bundle" "$SKOPEO" \
-    --command-timeout 90s copy --override-os linux --override-arch amd64 \
+    --command-timeout 90s copy --override-os linux --override-arch "$DEMO_ARCH" \
     "docker://$POSTGRES_IMAGE" dir:/bundle/images/postgres
 cp "$DEMO_DIR/values.yaml" "$work/values.yaml"
 
@@ -58,9 +58,10 @@ cp "$DEMO_DIR/values.yaml" "$work/values.yaml"
         done | jq -s . > files.json
     digest="$(sha256sum images/postgres/manifest.json)"
     jq -n --arg digest "sha256:${digest%% *}" --arg version "$CHART_VERSION" \
+        --arg platform "$TARGET_PLATFORM" \
         --arg image "$POSTGRES_IMAGE" \
         --slurpfile files files.json \
-        '{schemaVersion:1,platform:"linux/amd64",
+        '{schemaVersion:1,platform:$platform,
           image:{reference:$image,digest:$digest},
           chart:{name:"offline-postgresql",version:$version},files:$files[0]}' > metadata.json
 )

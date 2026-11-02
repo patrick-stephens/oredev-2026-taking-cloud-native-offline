@@ -29,7 +29,7 @@ CONNECTED (host + fresh k3d infrastructure)
   encrypted Cosign keypair (private key/password stay on build host)
   zarf package create --signing-key ...  (automatic SBOM generation)
             |
-  zarf-package-podinfo-offline-amd64-6.15.0.tar.zst
+  zarf-package-podinfo-offline-{target-arch}-6.15.0.tar.zst
             |
 ============ explicit isolation boundary =========================
 AIR-GAPPED (all CLI operations inside the k3d node)
@@ -55,8 +55,12 @@ Gitea inside this cluster**, using the public source cloned during CONNECTED.
 
 ## Prerequisites
 
-- Native **Linux amd64**, local Docker engine, permission to run privileged
-  k3d containers. At least 4 CPUs, 8 GiB available RAM and **8 GiB free disk**.
+- A local Docker engine matching the host architecture, with permission to run
+  privileged k3d containers. At least 4 CPUs, 8 GiB available RAM and **8 GiB
+  free disk**.
+- **Experimental macOS ARM:** use Docker Desktop's native Linux ARM64 engine.
+  Install Homebrew Bash 4+, `coreutils`, `findutils`, `gawk`, `gnu-sed`,
+  `gnu-tar`, `grep` and `jq`; expose their `gnubin` command paths.
 - Bash 4+, curl, jq, GNU coreutils (timeout, sha256sum, cmp), awk, grep and sed.
   Zarf supplies Helm; k3s supplies kubectl. No host Helm/kubectl is required.
 - Cosign runs from the pinned container image `ghcr.io/sigstore/cosign/cosign:v2.4.3`
@@ -67,9 +71,11 @@ Gitea inside this cluster**, using the public source cloned during CONNECTED.
 - One copy per engine: `zarf-lifecycle` / `k3d-zarf-lifecycle-server-0` are
   reserved for this demo. Host API exposure is loopback-only on a dynamic port.
 
-The installer downloads verified release binaries into `.tools/`, not `/usr/bin`;
-it never uses sudo or changes a remote repository. Release checksums establish
-download consistency, not independent publisher identity.
+The installer downloads verified native host binaries and a separate matching
+Linux target Zarf CLI into `.tools/`, not `/usr/bin`; it never uses sudo or
+changes a remote repository. Release checksums establish download consistency,
+not independent publisher identity. The macOS path is experimental and has not
+yet been end-to-end validated on the MacBook Neo.
 
 ## Run in one terminal
 
@@ -105,18 +111,20 @@ rehearsals, not silently upgraded each run. It stages the matching init archive
 and verifies its release checksum.
 
 The package definition is [zarf-config.yaml](zarf-config.yaml). v0.88.0 defaults
-to `zarf.yaml` when given a directory, so pass our requested filename explicitly:
+to `zarf.yaml` when given a directory, so pass our requested filename explicitly.
+The runner selects `arm64` on macOS ARM and `amd64` on Linux x86_64:
 
 ```bash
+target_arch=arm64 # Use amd64 on native Linux x86_64.
 ZARF_PACKAGE_CREATE_SIGNING_KEY_PASSWORD="$(cat keys/password)" \
-  .tools/zarf package create zarf-config.yaml --confirm \
+  .tools/zarf --architecture "$target_arch" package create zarf-config.yaml --confirm \
   --signing-key keys/cosign.key --tlog-upload=false \
   --output artifacts --cache .state/cache
 .tools/zarf package verify \
-  artifacts/zarf-package-podinfo-offline-amd64-6.15.0.tar.zst \
+  "artifacts/zarf-package-podinfo-offline-$target_arch-6.15.0.tar.zst" \
   --key keys/cosign.pub
 .tools/zarf package inspect sbom \
-  artifacts/zarf-package-podinfo-offline-amd64-6.15.0.tar.zst \
+  "artifacts/zarf-package-podinfo-offline-$target_arch-6.15.0.tar.zst" \
   --verify=always --key keys/cosign.pub \
   --output artifacts/sbom-connected
 ```
@@ -142,8 +150,8 @@ Startup waits for API readiness and, after restart, evidence that CoreDNS's
 manifest was applied during this boot. If k3s omits its controller-owned
 `NodeHosts` key, a node annotation triggers reconciliation and the script waits
 for that key and healthy addons before isolation. Cached node/tool images are
-checked for `linux/amd64`; a wrong-platform local tag is pulled correctly while
-still CONNECTED.
+checked for the selected Linux target architecture; a wrong-platform local tag
+is pulled correctly while still CONNECTED.
 
 ### Signing and independent trust
 
@@ -206,19 +214,22 @@ Counters are then reset so deliberate probes are not counted as unexpected
 deployment dependencies. Init and deploy run inside that **same namespace**:
 
 ```bash
-docker exec k3d-zarf-lifecycle-server-0 /work/.tools/zarf package verify \
-  /work/artifacts/zarf-package-podinfo-offline-amd64-6.15.0.tar.zst \
+target_arch=arm64 # Use amd64 on native Linux x86_64.
+package="/work/artifacts/zarf-package-podinfo-offline-$target_arch-6.15.0.tar.zst"
+init="/work/artifacts/zarf-init-$target_arch-v0.88.0.tar.zst"
+docker exec k3d-zarf-lifecycle-server-0 /work/.tools/zarf-target package verify \
+  "$package" \
   --key /work/trust/cosign.pub
 
 docker exec -e KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
-  k3d-zarf-lifecycle-server-0 /work/.tools/zarf init \
-  /work/artifacts/zarf-init-amd64-v0.88.0.tar.zst --confirm \
+  k3d-zarf-lifecycle-server-0 /work/.tools/zarf-target init \
+  "$init" --confirm \
   --components=git-server \
   --set-variables REGISTRY_PVC_SIZE=2Gi,GIT_SERVER_PVC_SIZE=2Gi,REGISTRY_HPA_ENABLE=false
 
 docker exec -e KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
-  k3d-zarf-lifecycle-server-0 /work/.tools/zarf package deploy \
-  /work/artifacts/zarf-package-podinfo-offline-amd64-6.15.0.tar.zst --confirm \
+  k3d-zarf-lifecycle-server-0 /work/.tools/zarf-target package deploy \
+  "$package" --confirm \
   --verify=always --key /work/trust/cosign.pub
 ```
 
@@ -372,7 +383,8 @@ absent from the archive and target mounts; Bash/ShellCheck validation passed.
   current boot's apply event, triggers reconciliation and waits for recovery.
   It does not patch DNS to reach external services.
 - **Node exits immediately / wrong cached architecture:** staging explicitly
-  checks `linux/amd64`, rather than trusting a locally present version tag.
+  checks the selected Linux target architecture, rather than trusting a
+  locally present version tag.
 - **Injector ConfigMap timeout / slow SQL:** a heavily loaded shared disk caused
   a k3s datastore timeout during retesting. Run on a quieter host and restart
   from cleanup; do not disable fsync or weaken isolation to hide the failure.

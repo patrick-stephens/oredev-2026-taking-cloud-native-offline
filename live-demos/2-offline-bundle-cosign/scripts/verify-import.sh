@@ -63,8 +63,8 @@ cmp "$trusted_key" "$payload/keys/cosign.pub" ||
     die "Bundled public key differs from the independently trusted key."
 printf 'VERIFIED: publisher signature (no network or transparency-log lookup).\n'
 
-jq -e --arg version "$CHART_VERSION" --arg image "$POSTGRES_IMAGE" '
-    .schemaVersion == 1 and .platform == "linux/amd64" and
+jq -e --arg version "$CHART_VERSION" --arg image "$POSTGRES_IMAGE" --arg platform "$TARGET_PLATFORM" '
+    .schemaVersion == 1 and .platform == $platform and
     .image.reference == $image and
     (.image.digest | test("^sha256:[a-f0-9]{64}$")) and
     .chart.name == "offline-postgresql" and .chart.version == $version and

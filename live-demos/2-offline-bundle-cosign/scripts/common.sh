@@ -4,6 +4,17 @@
 set -euo pipefail
 
 DEMO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "$(uname -s)" == Darwin ]]; then
+    homebrew_prefix="${HOMEBREW_PREFIX:-/opt/homebrew}"
+    if [[ -x "$homebrew_prefix/bin/brew" ]]; then
+        PATH="$HOME/.local/bin:$homebrew_prefix/bin:$PATH"
+        for formula in coreutils findutils gawk gnu-sed gnu-tar grep; do
+            gnubin="$homebrew_prefix/opt/$formula/libexec/gnubin"
+            [[ -d "$gnubin" ]] && PATH="$gnubin:$PATH"
+        done
+        export PATH
+    fi
+fi
 STATE="$DEMO_DIR/.state"
 KEYS_DIR="$DEMO_DIR/keys"
 if [[ -e "$KEYS_DIR/cosign.key" || -e "$KEYS_DIR/password" ]]; then
@@ -20,11 +31,13 @@ NETWORK=offline-bundle-target
 REGISTRY=offline-bundle-registry
 SKOPEO=quay.io/skopeo/stable:v1.20.0
 COSIGN=ghcr.io/sigstore/cosign/cosign:v2.4.3
-ZOT=ghcr.io/project-zot/zot-linux-amd64:v2.1.15
 NODE_IMAGE=kindest/node:v1.35.0
 CHART_VERSION=0.1.0
 POSTGRES_TAG=18.6-alpine3.23
 POSTGRES_IMAGE="docker.io/library/postgres:$POSTGRES_TAG"
+TARGET_PLATFORM=""
+DEMO_ARCH=""
+ZOT=""
 
 die() {
     printf 'ERROR: %s\n' "$*" >&2
@@ -43,24 +56,67 @@ advance() {
     fi
 }
 
+detect_target_platform() {
+    local engine_platform engine_arch host_os host_arch
+    engine_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
+    case "$engine_platform" in
+        linux/x86_64|linux/amd64) engine_arch=amd64 ;;
+        linux/aarch64|linux/arm64) engine_arch=arm64 ;;
+        *) die "Unsupported Docker engine platform: $engine_platform" ;;
+    esac
+    host_os="$(uname -s)"
+    host_arch="$(uname -m)"
+    case "$host_os/$host_arch/$engine_arch" in
+        Darwin/arm64/arm64|Linux/x86_64/amd64|Linux/aarch64/arm64|Linux/arm64/arm64) ;;
+        *) die "Use a native Linux Docker engine matching this host, or macOS ARM with Docker Desktop Linux ARM64." ;;
+    esac
+    DEMO_ARCH="$engine_arch"
+    TARGET_PLATFORM="linux/$DEMO_ARCH"
+    ZOT="ghcr.io/project-zot/zot-linux-$DEMO_ARCH:v2.1.15"
+    export DEMO_ARCH TARGET_PLATFORM
+}
+
 require_tools() {
     local tool
     for tool in docker helm kind jq tar timeout sha256sum find sort \
         stat awk grep cmp base64 head realpath; do
         command -v "$tool" >/dev/null || die "Required tool is missing: $tool"
     done
-    [[ "$(docker info --format '{{.OSType}}/{{.Architecture}}')" == linux/x86_64 ]] ||
-        die "Use a Linux amd64 Docker engine and a native Linux amd64 host."
-    [[ "$(uname -s)/$(uname -m)" == Linux/x86_64 ]] ||
-        die "The bundled Helm management binary requires a native Linux amd64 host."
+    detect_target_platform
     mkdir -p "$STATE"
     chmod 700 "$STATE"
 }
 
 ensure_image() {
-    if ! docker image inspect "$1" >/dev/null 2>&1; then
-        timeout 120s docker pull "$1"
+    local platform
+    platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$1" 2>/dev/null || true)"
+    if [[ "$platform" != "$TARGET_PLATFORM" ]]; then
+        timeout 120s docker pull --platform "$TARGET_PLATFORM" "$1"
     fi
+}
+
+target_helm() {
+    local version archive_url archive checksum work target
+    version="$(helm version --template '{{.Version}}')"
+    archive="helm-${version}-linux-${DEMO_ARCH}.tar.gz"
+    work="$STATE/target-tools"
+    target="$work/helm-${version}"
+    mkdir -p "$work"
+    if [[ ! -x "$target" ]]; then
+        archive="$work/$archive"
+        archive_url="https://get.helm.sh/$(basename -- "$archive")"
+        checksum="$(curl -fsSL "$archive_url.sha256sum" | awk '{print $1}')"
+        curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 180 \
+            "$archive_url" -o "$archive.partial"
+        printf '%s  %s\n' "$checksum" "$archive.partial" | sha256sum --check --status ||
+            die "Helm archive checksum verification failed."
+        mv "$archive.partial" "$archive"
+        tar -xzf "$archive" -C "$work" "linux-$DEMO_ARCH/helm"
+        cp "$work/linux-$DEMO_ARCH/helm" "$target"
+        chmod 755 "$target"
+        rm -rf -- "$work/linux-$DEMO_ARCH"
+    fi
+    printf '%s\n' "$target"
 }
 
 signing_tool() {

@@ -8,10 +8,26 @@
 # script follows the demos instead of duplicating their versions.
 #
 # Usage: scripts/provision-host.sh [--only IDS] [--skip IDS] [--dry-run] [--no-system-packages] [--list]
+# macOS support is experimental and limited to live-1, live-2 and adv-01.
 set -euo pipefail
 
+HOST_OS="$(uname -s)"
+HOST_ARCH="$(uname -m)"
+if [[ "$HOST_OS" == Darwin ]] && command -v brew >/dev/null; then
+    PATH="$(brew --prefix)/bin:$PATH"
+    export PATH
+fi
 if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
-    printf 'ERROR: Bash 4.3 or newer is required, including for --dry-run.\n' >&2
+    if [[ "$HOST_OS" == Darwin ]] && command -v brew >/dev/null; then
+        brew_bash="$(brew --prefix bash 2>/dev/null || true)/bin/bash"
+        if [[ -x "$brew_bash" && "$brew_bash" != "$BASH" ]]; then
+            exec "$brew_bash" "$0" "$@"
+        fi
+        printf 'ERROR: Install Homebrew Bash 4.3+ with brew install bash, then rerun with "%s".\n' \
+            "$(brew --prefix bash)/bin/bash" >&2
+    else
+        printf 'ERROR: Bash 4.3 or newer is required, including for --dry-run.\n' >&2
+    fi
     exit 1
 fi
 
@@ -20,6 +36,8 @@ LIVE="$REPO_ROOT/live-demos"
 ADV="$REPO_ROOT/advanced-demos"
 
 DEMO_IDS=(live-1 live-2 adv-01 adv-02 adv-03 adv-04 adv-05 adv-06 adv-07 adv-08 adv-09 adv-10 adv-11 adv-12)
+MACOS_DEMO_IDS=(live-1 live-2 adv-01)
+MACOS_BREW_FORMULAE=(bash coreutils findutils gawk gnu-sed gnu-tar grep jq)
 declare -A DEMO_PATH=(
     [live-1]=live-demos/1-pull-through-cache-zot
     [live-2]=live-demos/2-offline-bundle-cosign
@@ -39,8 +57,8 @@ declare -A DEMO_PATH=(
 # Host commands each demo checks for (docker/helm/kind/kubectl are handled separately).
 declare -A DEMO_CMDS=(
     [live-1]="curl jq timeout sha256sum cut grep clear"
-    [live-2]="jq tar timeout sha256sum find sort stat awk grep cmp base64 head realpath"
-    [adv-01]="curl jq sha256sum awk grep sed timeout head base64 cmp realpath"
+    [live-2]="jq tar timeout sha256sum find sort stat awk grep cmp base64 head realpath cp chmod mkdir mv"
+    [adv-01]="curl jq sha256sum awk grep sed timeout head base64 cmp realpath date"
     [adv-02]="curl sha256sum awk grep sed timeout"
     [adv-03]="flock jq diff sha256sum"
     [adv-04]="curl jq openssl sha256sum tar timeout clear uname grep sed sort tr cut base64 diff date"
@@ -61,6 +79,11 @@ declare -A APT_PACKAGE=(
     [virsh]="libvirt-clients libvirt-daemon-system qemu-system-x86"
     [virt-install]=virtinst [qemu-img]=qemu-utils
 )
+declare -A BREW_PACKAGE=(
+    [timeout]=coreutils [sha256sum]=coreutils [stat]=coreutils [realpath]=coreutils
+    [cut]=coreutils [cmp]=coreutils [base64]=coreutils [head]=coreutils [sort]=coreutils
+    [find]=findutils [awk]=gawk [sed]=gnu-sed [tar]=gnu-tar [grep]=grep [jq]=jq
+)
 
 # Shared host binaries: the demos that check exact versions pin them in ratify's versions.env.
 HELM_VERSION="$(source "$ADV/ratify-notation-policy/config/versions.env" && printf '%s' "$HELM_VERSION")"
@@ -70,10 +93,16 @@ KUBECTL_VERSION="v$(source "$ADV/kubean-lifecycle/config/versions.env" && printf
 
 if [[ -n "${PROVISION_BIN_DIR:-}" ]]; then
     BIN_DIR="$PROVISION_BIN_DIR"
+elif [[ "$HOST_OS" == Darwin ]]; then
+    BIN_DIR="$HOME/.local/bin"
 elif [[ -w /usr/local/bin ]]; then
     BIN_DIR=/usr/local/bin
 else
     BIN_DIR="$HOME/.local/bin"
+fi
+if [[ "$HOST_OS" == Darwin ]]; then
+    PATH="$BIN_DIR:$PATH"
+    export PATH
 fi
 
 INSTALL_SYSTEM_PACKAGES=1
@@ -86,19 +115,20 @@ p_usage() {
 Usage: ${0##*/} [options]
 
 Pre-caches the tools, container images and downloads needed by the demos.
-Provisioning requires Ubuntu x86_64. Dry runs work on other OSes with Bash 4.3+.
+Normal provisioning requires Ubuntu x86_64. Experimental macOS ARM support is
+limited to live-1, live-2 and adv-01. Dry runs work on other OSes with Bash 4.3+.
 
 Options:
-  --only IDS             Comma-separated demo IDs to provision (default: all)
+    --only IDS             Comma-separated demo IDs (Ubuntu default: all; macOS: supported three)
   --skip IDS             Comma-separated demo IDs to skip (e.g. adv-12, which needs ~60 GiB)
-  --no-system-packages   Do not apt-get install missing host commands; only report them
+    --no-system-packages   Do not install missing host commands; only report them
   --dry-run              Print requirements and actions without changing the host
   --list                 List demo IDs and exit
   -h, --help             Show this help
 
 Environment:
   PROVISION_BIN_DIR      Where helm/kind/kubectl are installed if missing
-                         (default: /usr/local/bin if writable, else ~/.local/bin)
+                                                 (default: ~/.local/bin on macOS; otherwise /usr/local/bin if writable)
 EOF
 }
 
@@ -131,9 +161,21 @@ while [[ $# -gt 0 ]]; do
         *) p_usage >&2; exit 2 ;;
     esac
 done
-[[ ${#SELECTED[@]} -gt 0 ]] || SELECTED=("${DEMO_IDS[@]}")
+if [[ ${#SELECTED[@]} -eq 0 ]]; then
+    if [[ "$HOST_OS" == Darwin ]]; then
+        SELECTED=("${MACOS_DEMO_IDS[@]}")
+    else
+        SELECTED=("${DEMO_IDS[@]}")
+    fi
+fi
 if [[ ${#SKIPPED[@]} -gt 0 ]]; then
     mapfile -t SELECTED < <(printf '%s\n' "${SELECTED[@]}" | grep -vxF -f <(printf '%s\n' "${SKIPPED[@]}") || true)
+fi
+if [[ "$HOST_OS" == Darwin ]]; then
+    for id in "${SELECTED[@]}"; do
+        [[ " ${MACOS_DEMO_IDS[*]} " == *" $id "* ]] ||
+            p_die "Experimental macOS provisioning supports only: ${MACOS_DEMO_IDS[*]} (requested: $id)."
+    done
 fi
 [[ ${#SELECTED[@]} -gt 0 ]] || p_die "No demos selected."
 
@@ -146,7 +188,7 @@ p_selected() {
 # ---------------------------------------------------------------- helpers
 
 p_collect_host_requirements() {
-    local id tool
+    local id tool package
     required_tools=()
     missing=()
     packages=()
@@ -158,8 +200,12 @@ p_collect_host_requirements() {
     for tool in "${required_tools[@]}"; do
         if ! command -v "$tool" >/dev/null; then
             missing+=("$tool")
-            # shellcheck disable=SC2206 # Some commands map to several packages.
-            packages+=(${APT_PACKAGE[$tool]:-coreutils})
+            if [[ "$HOST_OS" == Darwin ]]; then
+                package="${BREW_PACKAGE[$tool]:-}"
+            else
+                package="${APT_PACKAGE[$tool]:-coreutils}"
+            fi
+            [[ -z "$package" ]] || packages+=("$package")
         fi
     done
     if [[ ${#packages[@]} -gt 0 ]]; then
@@ -167,28 +213,86 @@ p_collect_host_requirements() {
     fi
 }
 
+p_add_brew_gnubin() {
+    [[ "$HOST_OS" == Darwin ]] || return 0
+    command -v brew >/dev/null || return 0
+    local formula gnubin
+    PATH="$(brew --prefix)/bin:$PATH"
+    for formula in coreutils findutils gawk gnu-sed gnu-tar grep; do
+        gnubin="$(brew --prefix "$formula" 2>/dev/null || true)/libexec/gnubin"
+        [[ -d "$gnubin" ]] && PATH="$gnubin:$PATH"
+    done
+    PATH="$BIN_DIR:$PATH"
+    export PATH
+}
+
+p_missing_brew_formulae() {
+    local formula
+    brew_missing=()
+    for formula in "${MACOS_BREW_FORMULAE[@]}"; do
+        if ! brew list --formula "$formula" >/dev/null 2>&1; then
+            brew_missing+=("$formula")
+        fi
+    done
+}
+
 p_dry_run() {
     local id tool state
     p_log "Dry run: no installs, downloads, Docker calls, or demo scripts will be executed"
-    printf 'Normal provisioning requires Ubuntu x86_64, Docker Engine, Compose v2 and Buildx.\n'
-    printf 'Ubuntu package equivalents for selected demos (adapt these for your OS):\n'
+    if [[ "$HOST_OS" == Darwin ]]; then
+        printf 'EXPERIMENTAL: macOS ARM support is limited to live-1, live-2 and adv-01.\n'
+        printf 'Docker Desktop must provide a native linux/arm64 engine.\n'
+        printf 'Required Homebrew formulae: %s\n' "${MACOS_BREW_FORMULAE[*]}"
+        if command -v brew >/dev/null; then
+            p_missing_brew_formulae
+            if [[ ${#brew_missing[@]} -gt 0 ]]; then
+                if [[ $INSTALL_SYSTEM_PACKAGES == 1 ]]; then
+                    printf 'Would install with: brew install %s\n' "${brew_missing[*]}"
+                else
+                    printf 'Homebrew installation disabled; missing formulae: %s\n' "${brew_missing[*]}"
+                fi
+            else
+                printf 'All required Homebrew formulae are installed.\n'
+            fi
+        else
+            printf 'Homebrew is not installed; install it before normal provisioning.\n'
+        fi
+        p_add_brew_gnubin
+    else
+        printf 'Normal provisioning requires Ubuntu x86_64, Docker Engine, Compose v2 and Buildx.\n'
+        printf 'Ubuntu package equivalents for selected demos (adapt these for your OS):\n'
+    fi
     p_collect_host_requirements
     for tool in "${required_tools[@]}"; do
         state=missing
         command -v "$tool" >/dev/null && state="on PATH"
-        printf '  %-14s -> %-50s [%s]\n' "$tool" "${APT_PACKAGE[$tool]:-coreutils}" "$state"
+        if [[ "$HOST_OS" == Darwin ]]; then
+            printf '  %-14s -> %-50s [%s]\n' "$tool" "${BREW_PACKAGE[$tool]:-system/Homebrew}" "$state"
+        else
+            printf '  %-14s -> %-50s [%s]\n' "$tool" "${APT_PACKAGE[$tool]:-coreutils}" "$state"
+        fi
     done
     if [[ ${#packages[@]} -eq 0 ]]; then
-        printf 'No system packages would be installed: all required commands are on PATH.\n'
+        if [[ "$HOST_OS" == Darwin ]]; then
+            printf 'Command-presence check found no missing tools; required Homebrew formulae are listed above.\n'
+        else
+            printf 'No system packages would be installed: all required commands are on PATH.\n'
+        fi
     elif [[ $INSTALL_SYSTEM_PACKAGES == 0 ]]; then
         printf 'System package installation disabled by --no-system-packages.\n'
-        printf 'Missing commands: %s\nUbuntu packages needed: %s\n' "${missing[*]}" "${packages[*]}"
+        if [[ "$HOST_OS" == Darwin ]]; then
+            printf 'Missing commands: %s\nHomebrew formulae needed: %s\n' "${missing[*]}" "${packages[*]}"
+        else
+            printf 'Missing commands: %s\nUbuntu packages needed: %s\n' "${missing[*]}" "${packages[*]}"
+        fi
+    elif [[ "$HOST_OS" == Darwin ]]; then
+        printf 'Homebrew packages are reported above; normal provisioning installs missing formulae.\n'
     else
         printf 'Would install missing commands on Ubuntu with:\n'
         printf '  sudo apt-get update -qq\n  sudo apt-get install -y -qq %s\n' "${packages[*]}"
     fi
     printf '\nCommand presence only was checked; versions, Docker, caches and VM access were not checked.\n'
-    printf 'Downloads below are for linux/amd64, not native tools for another OS.\n'
+    printf 'Native host binaries and matching Linux image architecture are selected during provisioning.\n'
     printf 'Shared binaries would be installed in %s when needed:\n' "$BIN_DIR"
     if p_selected live-2 || p_selected adv-02 || p_selected adv-04 || p_selected adv-12; then
         printf '  Ensure Helm %s, downloading and checksum-verifying it if the pinned version is absent.\n' "$HELM_VERSION"
@@ -253,12 +357,14 @@ p_pull() {
     for image in "$@"; do
         [[ -z "${seen[$image]:-}" ]] || continue
         seen[$image]=1
-        if docker image inspect "$image" >/dev/null 2>&1; then
+        local cached_platform
+        cached_platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image" 2>/dev/null || true)"
+        if [[ "$cached_platform" == "$TARGET_PLATFORM" ]]; then
             p_ok "image cached: $image"
             continue
         fi
         for attempt in 1 2 3; do
-            if docker pull --quiet --platform linux/amd64 "$image" >/dev/null; then
+            if docker pull --quiet --platform "$TARGET_PLATFORM" "$image" >/dev/null; then
                 p_ok "image pulled: $image"
                 continue 2
             fi
@@ -295,6 +401,7 @@ p_install_bin() {
     local src=$1 name=$2
     mkdir -p "$BIN_DIR"
     install -m 0755 "$src" "$BIN_DIR/$name"
+    hash -r
     p_ok "installed $name -> $BIN_DIR/$name"
     case ":$PATH:" in *":$BIN_DIR:"*) ;; *) p_warn "$BIN_DIR is not on PATH; add it so the demos find $name." ;; esac
 }
@@ -310,12 +417,13 @@ p_ensure_helm() {
         p_ok "helm $HELM_VERSION"
         return 0
     fi
-    local tmp archive="helm-$HELM_VERSION-linux-amd64.tar.gz" sha
+    local tmp archive sha
+    archive="helm-$HELM_VERSION-$HOST_PLATFORM-$TARGET_ARCH.tar.gz"
     tmp="$(mktemp -d)"
     sha="$(curl -fsSL "https://get.helm.sh/$archive.sha256sum" | awk '{print $1}')"
     p_fetch "https://get.helm.sh/$archive" "$tmp/$archive" "$sha"
-    tar -xzf "$tmp/$archive" -C "$tmp" linux-amd64/helm
-    p_install_bin "$tmp/linux-amd64/helm" helm
+    tar -xzf "$tmp/$archive" -C "$tmp" "$HOST_PLATFORM-$TARGET_ARCH/helm"
+    p_install_bin "$tmp/$HOST_PLATFORM-$TARGET_ARCH/helm" helm
     rm -rf -- "$tmp"
     p_check_resolved helm "$HELM_VERSION" "$(helm version --short)"
 }
@@ -325,10 +433,11 @@ p_ensure_kind() {
         p_ok "kind $KIND_VERSION"
         return 0
     fi
-    local tmp base="https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION" sha
+    local tmp base="https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION" sha binary
     tmp="$(mktemp -d)"
-    sha="$(curl -fsSL "$base/kind-linux-amd64.sha256sum" | awk '{print $1}')"
-    p_fetch "$base/kind-linux-amd64" "$tmp/kind" "$sha"
+    binary="kind-$HOST_PLATFORM-$TARGET_ARCH"
+    sha="$(curl -fsSL "$base/$binary.sha256sum" | awk '{print $1}')"
+    p_fetch "$base/$binary" "$tmp/kind" "$sha"
     p_install_bin "$tmp/kind" kind
     rm -rf -- "$tmp"
     p_check_resolved kind "kind $KIND_VERSION" "$(kind version)"
@@ -352,7 +461,7 @@ p_ensure_kubectl() {
 
 provision_live-1() {
     local d="$LIVE/1-pull-through-cache-zot"
-    timeout 900 docker compose --project-name offline-cache-demo --file "$d/compose.yaml" \
+    DEMO_ARCH="$TARGET_ARCH" DEMO_PLATFORM="$TARGET_PLATFORM" timeout 900 docker compose --project-name offline-cache-demo --file "$d/compose.yaml" \
         --profile tools pull --policy missing --quiet
     p_ok "compose images (zot, skopeo) cached"
 }
@@ -362,6 +471,8 @@ provision_live-2() {
     p_ensure_helm
     p_ensure_kind
     source "$d/scripts/common.sh"
+    detect_target_platform
+    target_helm >/dev/null
     p_pull "$NODE_IMAGE" "$ZOT" "$SKOPEO" "$COSIGN"
 }
 
@@ -369,11 +480,13 @@ provision_adv-01() {
     local d="$ADV/zarf-package-lifecycle"
     bash "$d/scripts/install-tools.sh"
     source "$d/scripts/common.sh"
+    detect_target_platform
     p_pull "$NODE_IMAGE" "$COSIGN" ghcr.io/k3d-io/k3d-tools:5.9.0 ghcr.io/stefanprodan/podinfo:6.15.0
     local base="https://github.com/zarf-dev/zarf/releases/download/v0.88.0" sha
-    sha="$(curl -fsSL "$base/checksums.txt" | awk -v f="$INIT" '$2 == f {print $1}')"
-    [[ -n "$sha" ]] || p_die "No checksum for $INIT"
-    p_fetch "$base/$INIT" "$ARTIFACTS/$INIT" "$sha"
+    local init="zarf-init-${TARGET_ARCH}-v0.88.0.tar.zst"
+    sha="$(curl -fsSL "$base/checksums.txt" | awk -v f="$init" '$2 == f {print $1}')"
+    [[ -n "$sha" ]] || p_die "No checksum for $init"
+    p_fetch "$base/$init" "$ARTIFACTS/$init" "$sha"
 }
 
 provision_adv-02() {
@@ -554,29 +667,67 @@ if [[ $DRY_RUN == 1 ]]; then
 fi
 
 p_log "Host checks"
-[[ "$(uname -s)" == Linux ]] ||
-    p_die "Provisioning requires Ubuntu; use --dry-run to view requirements and adapt them for your OS."
-distro="$(
-    if [[ -r /etc/os-release ]]; then
-        source /etc/os-release
-        printf '%s' "${ID:-unknown}"
-    else
-        printf 'unknown'
-    fi
-)"
-[[ "$distro" == ubuntu ]] ||
-    p_die "Provisioning requires Ubuntu (detected: $distro); use --dry-run to view requirements and adapt them for your OS."
-[[ "$(uname -s)/$(uname -m)" == Linux/x86_64 ]] || p_die "The demos pin linux/amd64; use a native Linux x86_64 host."
+if [[ "$HOST_OS" == Darwin ]]; then
+    [[ "$HOST_ARCH" == arm64 ]] || p_die "Experimental macOS provisioning requires Apple Silicon (arm64)."
+    HOST_PLATFORM=darwin
+elif [[ "$HOST_OS" == Linux ]]; then
+    distro="$(
+        if [[ -r /etc/os-release ]]; then
+            source /etc/os-release
+            printf '%s' "${ID:-unknown}"
+        else
+            printf 'unknown'
+        fi
+    )"
+    [[ "$distro" == ubuntu ]] ||
+        p_die "Provisioning requires Ubuntu (detected: $distro); use --dry-run to view requirements and adapt them for your OS."
+    [[ "$HOST_ARCH" == x86_64 ]] || p_die "Linux provisioning currently requires Ubuntu x86_64."
+    HOST_PLATFORM=linux
+else
+    p_die "Normal provisioning supports Ubuntu x86_64 and experimental macOS arm64."
+fi
 command -v docker >/dev/null || p_die "Install Docker Engine first: https://docs.docker.com/engine/install/"
 docker info >/dev/null 2>&1 || p_die "Docker is not reachable; start it and ensure you can run docker without sudo."
-[[ "$(docker info --format '{{.OSType}}/{{.Architecture}}')" == linux/x86_64 ]] || p_die "A linux/amd64 Docker engine is required."
+engine_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
+case "$engine_platform" in
+    linux/x86_64|linux/amd64) ENGINE_ARCH=amd64 ;;
+    linux/aarch64|linux/arm64) ENGINE_ARCH=arm64 ;;
+    *) p_die "Unsupported Docker engine platform: $engine_platform (need linux/amd64 or linux/arm64)." ;;
+esac
+if [[ "$HOST_PLATFORM/$HOST_ARCH" == darwin/arm64 ]]; then
+    [[ "$ENGINE_ARCH" == arm64 ]] || p_die "Docker Desktop must use its native linux/arm64 engine on this Mac."
+else
+    [[ "$ENGINE_ARCH" == amd64 ]] || p_die "Ubuntu provisioning currently requires a linux/amd64 Docker engine."
+fi
+TARGET_ARCH="$ENGINE_ARCH"
+TARGET_PLATFORM="linux/$TARGET_ARCH"
+export HOST_OS HOST_ARCH HOST_PLATFORM TARGET_ARCH TARGET_PLATFORM
 docker compose version >/dev/null 2>&1 || p_die "Docker Compose v2 plugin is required."
 docker buildx version >/dev/null 2>&1 || p_die "Docker Buildx plugin is required."
 p_ok "docker $(docker version --format '{{.Server.Version}}'), $(docker compose version --short 2>/dev/null || echo compose), buildx"
 
+p_add_brew_gnubin
+if [[ "$HOST_OS" == Darwin ]]; then
+    command -v brew >/dev/null || p_die "Install Homebrew before normal macOS provisioning."
+    p_missing_brew_formulae
+    if [[ ${#brew_missing[@]} -gt 0 ]]; then
+        if [[ $INSTALL_SYSTEM_PACKAGES == 1 ]]; then
+            p_log "Installing Homebrew formulae: ${brew_missing[*]}"
+            brew install "${brew_missing[@]}"
+            p_add_brew_gnubin
+        else
+            p_warn "Missing Homebrew formulae: ${brew_missing[*]} (installation disabled)."
+        fi
+    fi
+fi
+
 p_collect_host_requirements
 if [[ ${#missing[@]} -gt 0 ]]; then
-    if [[ $INSTALL_SYSTEM_PACKAGES == 1 ]] && command -v apt-get >/dev/null; then
+    if [[ "$HOST_OS" == Darwin && $INSTALL_SYSTEM_PACKAGES == 1 ]]; then
+        p_die "Required commands remain missing after Homebrew setup: ${missing[*]}"
+    elif [[ "$HOST_OS" == Darwin ]]; then
+        p_warn "Missing host commands: ${missing[*]} (Homebrew formulae: ${packages[*]}). Demos needing them will fail."
+    elif [[ $INSTALL_SYSTEM_PACKAGES == 1 ]] && command -v apt-get >/dev/null; then
         p_log "Installing missing host commands (${missing[*]}) via apt: ${packages[*]}"
         sudo_cmd=()
         [[ $EUID -eq 0 ]] || sudo_cmd=(sudo)

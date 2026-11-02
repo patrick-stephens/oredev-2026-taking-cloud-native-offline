@@ -36,13 +36,19 @@ installing a proxy does not eliminate every online dependency.
 
 ## Prerequisites and assumptions
 
-- A Linux **amd64** Docker engine (native Linux or Docker Desktop's Linux engine),
-  Docker CLI and Compose v2+; permission to use Docker without `sudo`.
-  The zot image is architecture-specific; this demo deliberately targets amd64.
-- Bash 4+, `curl`, `jq`, GNU `timeout`, `sha256sum`, `cut`, `grep`, and `clear`
-  (normally included on Linux; on macOS install Bash, coreutils and jq and make
-  GNU `timeout` available under that name).
-- Port **127.0.0.1:5000** free; approximately 2 GB free Docker storage.
+- A Linux Docker engine (native Linux or Docker Desktop), Docker CLI and Compose
+  v2+; permission to use Docker without `sudo`. The demo selects the matching
+  amd64 or ARM64 zot image from the engine architecture.
+- **Experimental macOS ARM:** use Docker Desktop's native Linux ARM64 engine.
+  Install Homebrew Bash 4+, `coreutils`, `findutils`, `gawk`, `gnu-sed`,
+  `gnu-tar`, `grep` and `jq`; expose their `gnubin` command paths.
+- This macOS path is experimental. On 2026-11-02, MacBook Neo smoke testing
+  passed for start/prime/stop on `linux/arm64`, using host port 5001 and caching
+  488 MiB. The network-disconnection phase was not run on the shared Mac host.
+- Bash 4+, `curl`, `jq`, GNU `timeout`, `sha256sum`, `cut`, `grep`, and `clear`.
+- Port **127.0.0.1:5000** free on Linux or **127.0.0.1:5001** free on macOS;
+  approximately 2 GB free Docker storage. macOS defaults to 5001 because
+  AirPlay Receiver can occupy port 5000. Override with `DEMO_HOST_PORT` if needed.
 - Initial access to GHCR, Quay, Docker Hub, its authentication service and layer
   CDN. Anonymous Docker Hub pulls must not be rate-limited.
 - No corporate proxy is configured inside these containers. Host proxy variables
@@ -53,10 +59,11 @@ installing a proxy does not eliminate every online dependency.
 Skopeo is supplied by the pinned `quay.io/skopeo/stable:v1.20.0` tools service;
 you **do not need to install Skopeo on the host**. zot is pinned to v2.1.15.
 Container tools share zot's network namespace, so `localhost:5000` means the
-same registry from inside the client and, while the uplink is attached, from
-your terminal. Docker withdraws the host's published port when the last
-external network is disconnected. During isolation, the scripts reach
-`localhost:5000` **inside the client namespace**; host access returns on restore.
+same registry from inside the client. The host reaches it on `DEMO_HOST_PORT`
+(5000 on Linux, 5001 by default on macOS) while the uplink is attached. Docker
+withdraws the host's published port when the last external network is
+disconnected. During isolation, scripts reach `localhost:5000` **inside the
+client namespace**; host access returns on restore.
 
 ## Run the talk, in one terminal
 
@@ -109,10 +116,12 @@ only this demo's stored images before starting again:
 Expected:
 
 ```text
-1 / START: pull-through registry on localhost:5000
-READY: http://localhost:5000/v2/
+1 / START: pull-through registry on 127.0.0.1:<host-port>
+READY: http://127.0.0.1:<host-port>/v2/
 Persistent storage: Docker volume mounted at /var/lib/zot
 ```
+
+`<host-port>` is 5000 on Linux and 5001 by default on macOS.
 
 Startup downloads missing tools, starts zot, restores the demo uplink if needed,
 and waits for `/v2/`. Startup fails explicitly on missing dependencies, occupied
@@ -159,7 +168,9 @@ the tooling container mounts the same volume **read-only** at `/cache`.
 You can also inspect them manually, before stopping:
 
 ```bash
-curl --noproxy '*' -fsS http://localhost:5000/v2/nginx/tags/list | jq .
+host_port="${DEMO_HOST_PORT:-5000}"
+if [[ "$(uname -s)" == Darwin && -z "${DEMO_HOST_PORT:-}" ]]; then host_port=5001; fi
+curl --noproxy '*' -fsS "http://127.0.0.1:$host_port/v2/nginx/tags/list" | jq .
 docker compose run --rm --no-deps -T --entrypoint /bin/sh skopeo \
   -c 'find /cache -type f; du -sh /cache'
 docker compose logs --tail 30 zot
@@ -275,7 +286,7 @@ images or modifies unrelated Docker projects.
 
 - This is registry caching, not a complete air-gap supply chain. Uncached
   images still need upstream access; prime every required image/platform first.
-  Skopeo exercises the client's native amd64 image, not every platform.
+  Skopeo exercises the client's engine-native image platform, not every platform.
   zot may store the complete upstream multi-platform index and its images;
   the tested nginx cache occupied approximately 490 MiB.
 - `latest` is deliberately used for the talk. Proxy mode attempts tag refreshes;
@@ -302,7 +313,8 @@ docker compose --profile tools config --quiet
 docker compose logs --tail 100 zot
 ```
 
-For bind errors, free port 5000. For upstream `429`/authentication errors, resolve
+For bind errors, free the selected host port (5000 on Linux, 5001 by default on
+macOS) or set `DEMO_HOST_PORT`. For upstream `429`/authentication errors, resolve
 Docker Hub access/rate limits before the talk; do not treat them as proof of an
 outage. For namespace/network errors, stop then start the demo. If the offline
 copy exceeds 15 seconds, check local Docker storage/CPU load and rehearse again.
