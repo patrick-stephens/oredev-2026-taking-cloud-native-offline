@@ -52,7 +52,7 @@ Separately install these **recording-only** tools on the connected host:
 Use official release binaries for asciinema/agg matching your OS and
 architecture, and put them on `PATH`. FFmpeg must include the `libx264` encoder;
 install a monospace font such as DejaVu Sans Mono. Recording tools are deliberately
-not part of demo provisioning: playback needs none of them, and individual demos
+not part of demo provisioning: MP4 playback needs none of them, and individual demos
 remain self-contained.
 
 ## Capture all three
@@ -103,6 +103,9 @@ a new one. After reviewing it, remove only that failed export's intermediate
 files. Successful exports remove their intermediate GIF automatically.
 
 ## Playback and narration
+
+See the [recordings README](../recordings/README.md) for macOS player installation,
+ready-to-run playback commands, keyboard controls and MacBook validation results.
 
 1. Open `demo.mp4` in a local player such as VLC. Confirm readable text, duration
    and chapter navigation on the actual projector before the session.

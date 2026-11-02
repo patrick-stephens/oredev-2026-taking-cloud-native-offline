@@ -70,6 +70,7 @@ kind-config.yaml
 
 # Keep only reviewed presentation fallbacks; ignore raw captures and setup takes.
 /recordings/*
+!/recordings/README.md
 !/recordings/live-1/
 !/recordings/live-2/
 !/recordings/zarf/
