@@ -124,6 +124,9 @@ toggle is needed. On macOS it also cleans stale resources owned by LIVE-1,
 LIVE-2 and ADV-01 before starting, then cleans them again on exit. For an
 unattended rehearsal:
 
+Each stage prints copyable, read-only commands to inspect the signed bundle,
+target routes, imported registry digest, Kubernetes pod/PVC state, and SQL result.
+
 ```bash
 time DEMO_AUTO_ADVANCE=1 ./run-demo.sh --tamper
 ```

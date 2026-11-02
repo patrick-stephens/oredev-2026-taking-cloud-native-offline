@@ -12,6 +12,10 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 
 banner "2 / PRIME: request nginx:latest THROUGH zot"
 require_tools
+show_commands \
+    "curl --noproxy '*' -fsS '$HOST_CACHE_URL/v2/nginx/tags/list' | jq ." \
+    "docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' run --rm --no-deps -T --interactive=false --entrypoint /bin/sh skopeo -ec 'find /cache/nginx/blobs -type f; du -sh /cache'" \
+    "docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' logs --tail 30 zot"
 registry_id >/dev/null
 set_registry_mode online
 

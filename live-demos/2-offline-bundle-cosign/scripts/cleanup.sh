@@ -5,6 +5,10 @@
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 banner "6 / CLEANUP: remove the disposable air-gapped target"
+show_commands \
+    "docker ps -a --filter name='$NODE' --format '{{.Names}} {{.Status}}'" \
+    "docker volume ls --filter label=offline-bundle-demo=true" \
+    "docker network ls --filter label=offline-bundle-demo=true"
 if docker container inspect "$NODE" >/dev/null 2>&1; then
     assert_target_owned
 fi

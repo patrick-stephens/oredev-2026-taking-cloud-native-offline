@@ -4,6 +4,9 @@
 set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 phase "CLEANUP: remove the disposable cluster (and its firewall namespace)"
+show_commands \
+    "docker ps -a --filter name='$NODE' --format '{{.Names}} {{.Status}}'" \
+    "docker volume ls --filter label=k3d.cluster=zarf-lifecycle"
 if docker container inspect "$NODE" >/dev/null 2>&1; then
     assert_owned
     KUBECONFIG="$STATE/kubeconfig" "$TOOLS/k3d" cluster delete "$CLUSTER"

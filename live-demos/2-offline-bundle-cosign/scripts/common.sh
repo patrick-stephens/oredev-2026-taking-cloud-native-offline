@@ -50,6 +50,11 @@ banner() {
     printf '\n============================================================\n%s\n============================================================\n' "$1"
 }
 
+show_commands() {
+    printf '\nShow this stage (read-only commands):\n'
+    printf '  %s\n' "$@"
+}
+
 advance() {
     if [[ -t 0 && -t 1 && ${DEMO_AUTO_ADVANCE:-0} != 1 ]]; then
         read -r -p 'Press Enter for the next phase... ' || die "Input ended before the next phase."

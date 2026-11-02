@@ -8,6 +8,10 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 
 banner "1 / START: pull-through registry on 127.0.0.1:$DEMO_HOST_PORT"
 require_tools
+show_commands \
+	"curl --noproxy '*' -fsS '$HOST_CACHE_URL/v2/'" \
+	"docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' ps" \
+	"docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' logs --tail 20 zot"
 
 # Pull missing tooling now, not after the simulated outage.
 timeout 120s "${COMPOSE[@]}" --profile tools pull --policy missing

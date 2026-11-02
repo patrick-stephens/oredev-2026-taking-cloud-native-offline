@@ -14,6 +14,11 @@ assert_private_keys_unmounted
 phase "PHASE 2: AIR-GAPPED - block and prove node/pod egress"
 docker exec "$NODE" sh /work/config/isolate.sh
 assert_isolated
+show_commands \
+    "docker exec '$NODE' ip -4 route show default" \
+    "docker exec '$NODE' iptables -t mangle -nvxL ZARF_DEMO_EGRESS" \
+    "docker exec '$NODE' ip6tables -t mangle -nvxL ZARF_DEMO_EGRESS" \
+    "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes,pods -A -o wide"
 
 # Numerical IP avoids mistaking a DNS failure for a blocked internet route.
 if docker exec "$NODE" wget -T 3 -O /dev/null http://1.1.1.1 > "$STATE/probe.log" 2>&1; then
@@ -32,6 +37,9 @@ target_zarf package verify "/work/artifacts/$PACKAGE" --key /work/trust/cosign.p
     > "$STATE/verify.log" 2>&1 ||
     die "Package signature/integrity verification failed before init. See .state/verify.log."
 printf 'VERIFIED: package signature and integrity using the independently trusted public key, offline.\n'
+show_commands \
+    "docker exec '$NODE' /work/.tools/zarf-target package verify '/work/artifacts/$PACKAGE' --key /work/trust/cosign.pub --no-color" \
+    "docker exec '$NODE' iptables -t mangle -nvxL ZARF_DEMO_EGRESS"
 
 phase "PHASE 3: AIR-GAPPED - Zarf injector bootstraps registry, agent and Git"
 if kube -n zarf get secret zarf-package-init >/dev/null 2>&1; then
@@ -45,8 +53,15 @@ else
         die "Offline init failed. Private diagnostic log: .state/init.log (may contain credentials)."
 fi
 printf 'INITIALIZED: registry, mutating agent and local Gitea are running.\n'
+show_commands \
+    "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n zarf get pods -o wide" \
+    "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n zarf get pvc"
 
 phase "PHASE 4: AIR-GAPPED - deploy the complete package"
+show_commands \
+    "docker exec '$NODE' /work/.tools/zarf-target package deploy '/work/artifacts/$PACKAGE' --confirm --verify=always --key /work/trust/cosign.pub --no-color" \
+    "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n podinfo get pods -o wide" \
+    "docker exec '$NODE' iptables -t mangle -nvxL ZARF_DEMO_EGRESS"
 target_zarf package deploy "/work/artifacts/$PACKAGE" --confirm --timeout 180s \
     --verify=always --key /work/trust/cosign.pub \
     > "$STATE/deploy.log" 2>&1 ||
@@ -99,3 +114,7 @@ grep -Eq 'refused|unreachable|timed out' "$STATE/pod-probe.log" ||
     die "Pod probe failed for an unexpected reason; inspect .state/pod-probe.log."
 audit_egress > "$ARTIFACTS/egress-deliberate-pod-probe.txt"
 printf 'PROVED: deliberate external HTTP from the running pod is blocked too.\n'
+show_commands \
+    "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml -n podinfo get pods -o wide" \
+    "docker exec '$NODE' /work/.tools/zarf-target package list --no-color" \
+    "docker exec '$NODE' ip6tables -t mangle -nvxL ZARF_DEMO_EGRESS"

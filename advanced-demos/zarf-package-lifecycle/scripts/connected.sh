@@ -47,6 +47,11 @@ wait_for_bootstrap() {
 }
 
 phase "PHASE 1: CONNECTED - stage tools, init package and workload package"
+show_commands \
+    "docker image ls --format '{{.Repository}}:{{.Tag}} {{.Size}}'" \
+    "ls -lh '$ARTIFACTS/$INIT' '$ARTIFACTS/$PACKAGE'" \
+    "'$TOOLS/zarf' --architecture '$DEMO_ARCH' package verify '$ARTIFACTS/$PACKAGE' --key '$KEYS/cosign.pub' --no-color" \
+    "jq '{name,packages:(.artifacts|length)}' '$ARTIFACTS/sbom-connected/podinfo-offline/ghcr.io_stefanprodan_podinfo_6.15.0.json'"
 bash "$DEMO_DIR/scripts/install-tools.sh"
 require_tools
 cd "$DEMO_DIR"
@@ -151,4 +156,8 @@ if ! kube get namespace zarf >/dev/null 2>&1; then
     restarted_at="$(docker inspect --format '{{.State.StartedAt}}' "$NODE")"
     wait_for_bootstrap "$(date -u -d "$restarted_at" +%Y-%m-%dT%H:%M:%SZ)"
 fi
+show_commands \
+    "docker exec '$NODE' /bin/ctr images ls" \
+    "docker exec '$NODE' /bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes,pods -A -o wide" \
+    "docker exec '$NODE' ip -4 route show default"
 printf 'CONNECTED COMPLETE: both application and init archives are staged locally.\n'

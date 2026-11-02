@@ -18,6 +18,9 @@ fi
 cleanup() {
     local status=$? elapsed
     trap - EXIT
+    if [[ $status -ne 0 && ${MACOS_TEST_DIAGNOSTICS:-0} == 1 ]]; then
+        bash "$ROOT/../../scripts/diagnose-macos-demo.sh" live-2 || true
+    fi
     if [[ "$(uname -s)" == Darwin ]]; then
         cleanup_macos_demos || status=1
     else

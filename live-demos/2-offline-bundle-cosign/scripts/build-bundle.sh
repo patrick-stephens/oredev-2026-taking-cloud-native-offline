@@ -11,6 +11,11 @@ set -euo pipefail
 source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 banner "1 / CONNECTED: package our chart, pull PostgreSQL, sign the complete inventory"
 require_tools
+show_commands \
+    "helm lint '$DEMO_DIR/chart' -f '$DEMO_DIR/values.yaml' --strict" \
+    "tar -tzf '$DEMO_DIR/bundle.tar.gz' | sed -n '1,20p'" \
+    "jq . <(tar -xzOf '$DEMO_DIR/bundle.tar.gz' metadata.json)" \
+    "sha256sum '$DEMO_DIR/bundle.tar.gz'"
 ensure_image "$SKOPEO"
 ensure_image "$COSIGN"
 umask 077
@@ -74,3 +79,4 @@ printf '\nBUNDLE: %s/bundle.tar.gz\n' "$DEMO_DIR"
 printf 'TRUST OUT OF BAND: copy %s separately to the target.\n' "$COSIGN_PUB"
 sha256sum "$COSIGN_PUB"
 jq '{image,chart,authenticatedFiles:(.files|length)}' "$work/metadata.json"
+printf 'Show the signed bundle inventory with: jq . <(tar -xzOf bundle.tar.gz metadata.json)\n'

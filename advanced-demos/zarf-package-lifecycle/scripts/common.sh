@@ -57,6 +57,11 @@ phase() {
     sleep 1
 }
 
+show_commands() {
+    printf '\nShow this stage (read-only commands):\n'
+    printf '  %s\n' "$@"
+}
+
 require_tools() {
     local tool
     for tool in docker curl jq sha256sum awk grep sed timeout head base64 cmp realpath; do

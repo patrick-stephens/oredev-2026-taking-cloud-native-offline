@@ -40,6 +40,11 @@ banner() {
     printf '\n============================================================\n%s\n============================================================\n' "$1"
 }
 
+show_commands() {
+    printf '\nShow this stage (read-only commands):\n'
+    printf '  %s\n' "$@"
+}
+
 require_tools() {
     local tool engine_platform engine_arch
     for tool in docker curl jq timeout sha256sum cut grep; do

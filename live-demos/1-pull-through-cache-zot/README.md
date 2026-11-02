@@ -42,9 +42,6 @@ installing a proxy does not eliminate every online dependency.
 - **Experimental macOS ARM:** use Docker Desktop's native Linux ARM64 engine.
   Install Homebrew Bash 4+, `coreutils`, `findutils`, `gawk`, `gnu-sed`,
   `gnu-tar`, `grep` and `jq`; expose their `gnubin` command paths.
-- This macOS path is experimental. On 2026-11-02, MacBook Neo smoke testing
-  passed for start/prime/stop on `linux/arm64`, using host port 5001 and caching
-  488 MiB. The network-disconnection phase was not run on the shared Mac host.
 - Bash 4+, `curl`, `jq`, GNU `timeout`, `sha256sum`, `cut`, `grep`, and `clear`.
 - Port **127.0.0.1:5000** free on Linux or **127.0.0.1:5001** free on macOS;
   approximately 2 GB free Docker storage. macOS defaults to 5001 because
@@ -85,6 +82,9 @@ For a complete run with automatic cleanup on macOS, use
 `./scripts/run-demo.sh`. It stops this demo's old Compose project before
 starting and removes its containers and networks on exit, including failure or
 interrupt. The cache volume and downloaded images are retained.
+
+Each stage also prints copyable, read-only commands to inspect zot readiness,
+cached tags and blobs, the isolated client network, and cleanup state.
 
 Run each command when ready to advance your narration. Each phase clears an
 interactive terminal and prints a banner; redirected/non-interactive output

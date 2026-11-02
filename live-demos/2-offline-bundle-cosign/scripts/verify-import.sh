@@ -29,6 +29,10 @@ for image in "$ZOT" "$SKOPEO" "$COSIGN"; do
         die "Missing pre-staged tool image: $image. Do not download it on the offline side."
 done
 banner "3 / AIR GAP: receive the archive and verify its signed inventory"
+show_commands \
+    "docker exec '$NODE' ip -4 route show default" \
+    "docker exec '$NODE' ip -6 route show default" \
+    "docker exec '$NODE' kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes -o wide"
 umask 077
 work="$(mktemp -d "$DEMO_DIR/.verify.XXXXXXXX")"
 trap 'remove_workdir "$work"' EXIT
@@ -99,6 +103,9 @@ digest="$(jq -r '.image.digest' "$payload/metadata.json")"
 actual="$(sha256sum "$payload/images/postgres/manifest.json")"
 [[ "$digest" == "sha256:${actual%% *}" ]] || die "Image digest does not match the authenticated manifest."
 printf 'VERIFIED: all chart, values, public-key and image files match the signed inventory.\n'
+show_commands \
+    "jq '{platform,image,chart,authenticatedFiles:(.files|length)}' '$payload/metadata.json'" \
+    "sha256sum '$payload/images/postgres/manifest.json'"
 
 advance
 banner "4 / IMPORT: start a local-only zot and load the verified image"
@@ -129,6 +136,9 @@ if [[ "$ready" != true ]]; then
     die "Local registry did not become ready."
 fi
 assert_offline
+show_commands \
+    "docker exec '$NODE' curl --noproxy '*' -fsS http://localhost:5001/v2/" \
+    "docker exec '$NODE' ip -4 route show default"
 printf 'Proving a direct Docker Hub request is impossible from the target...\n'
 if failure="$(timeout 20s docker run --rm --network "container:$NODE" "$SKOPEO" \
     --command-timeout 8s inspect --raw "docker://$POSTGRES_IMAGE" 2>&1)"; then
@@ -151,6 +161,10 @@ printf 'IMPORTED: localhost:5001/postgres:%s (%s)\n' "$POSTGRES_TAG" "$digest"
 
 advance
 banner "5 / DEPLOY: local Helm chart, verified digest, no external pulls"
+show_commands \
+    "docker exec '$NODE' kubectl --kubeconfig /etc/kubernetes/admin.conf -n offline-bundle get pods,pvc -o wide" \
+    "docker exec '$NODE' kubectl --kubeconfig /etc/kubernetes/admin.conf -n offline-bundle get pod offline-postgresql-0 -o jsonpath='{.spec.containers[0].image}'" \
+    "docker exec '$NODE' kubectl --kubeconfig /etc/kubernetes/admin.conf -n offline-bundle exec statefulset/offline-postgresql -- sh -ec 'export PGPASSWORD=\"\$POSTGRES_PASSWORD\"; psql --host=127.0.0.1 --username=\"\$POSTGRES_USER\" --dbname=\"\$POSTGRES_DB\" --no-password --tuples-only --no-align --command=\"SELECT current_database(), current_user, 1;\"'"
 docker exec "$NODE" mkdir -p /offline-bundle
 docker cp "$payload/charts/offline-postgresql-$CHART_VERSION.tgz" "$NODE:/offline-bundle/postgresql.tgz"
 docker cp "$payload/values.yaml" "$NODE:/offline-bundle/values.yaml"

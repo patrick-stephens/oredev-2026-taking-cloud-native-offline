@@ -10,6 +10,9 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 [[ $# == 0 || $1 == --purge ]] || die "Usage: $0 [--purge]"
 banner "5 / STOP: clean up the demo"
 require_tools
+show_commands \
+    "docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' ps -a" \
+    "docker volume ls --filter label=com.docker.compose.project=offline-cache-demo"
 args=(--remove-orphans)
 if [[ ${1:-} == --purge ]]; then
     args+=(--volumes)

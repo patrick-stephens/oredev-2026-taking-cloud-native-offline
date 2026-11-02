@@ -86,3 +86,4 @@ kind-config.yaml
 !/recordings/zarf/demo.cast
 !/recordings/zarf/chapters.txt
 !/recordings/zarf/chapters.ffmetadata
+scripts/*macos*.sh

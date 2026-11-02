@@ -17,6 +17,10 @@ HUB_IMAGE="docker://docker.io/library/nginx:latest"
 
 banner "3 / OFFLINE: cut internet for BOTH zot and its pull client"
 require_tools
+show_commands \
+    "docker network ls --filter label=com.docker.compose.project=offline-cache-demo --format '{{.Name}} {{.Labels}}'" \
+    "docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' run --rm --no-deps -T --interactive=false skopeo --command-timeout 8s inspect --raw docker://docker.io/library/nginx:latest" \
+    "curl --noproxy '*' -fsS '$HOST_CACHE_URL/v2/nginx/tags/list' | jq ."
 id="$(registry_id)"
 network="$(uplink_name "$id")"
 ensure_online "$id" "$network"
@@ -80,6 +84,9 @@ if [[ -t 0 && -t 1 && ${DEMO_AUTO_ADVANCE:-0} != 1 ]]; then
         die "Input ended before the cache check."
 fi
 banner "4 / CACHE HIT: pull ALL nginx layers with no internet"
+show_commands \
+    "docker compose --project-name offline-cache-demo --file '$DEMO_DIR/compose.yaml' run --rm --no-deps -T --interactive=false skopeo --command-timeout 90s copy --src-tls-verify=false docker://localhost:5000/nginx:latest dir:/tmp/nginx-offline" \
+    "docker inspect --format '{{json .NetworkSettings.Networks}}' '$id'"
 start=$SECONDS
 # A fresh, disposable skopeo container cannot reuse the online client's files.
 skopeo_run copy --src-tls-verify=false "$CACHE_IMAGE" dir:/tmp/nginx-offline

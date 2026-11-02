@@ -31,4 +31,8 @@ docker exec "$NODE" sh -ec 'if [ -n "$(ip -4 route show default)" ]; then ip -4 
 assert_offline
 printf 'OFFLINE: target has no IPv4/IPv6 default route; host networking is unchanged.\n'
 kube get nodes
+show_commands \
+    "docker exec '$NODE' kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes -o wide" \
+    "docker exec '$NODE' ip -4 route show default" \
+    "docker inspect --format '{{json .NetworkSettings.Networks}}' '$NODE'"
 printf 'Infrastructure is pre-staged; all following supply-chain steps are offline.\n'

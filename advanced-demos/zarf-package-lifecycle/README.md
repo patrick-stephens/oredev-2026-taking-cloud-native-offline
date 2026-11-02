@@ -75,10 +75,7 @@ Gitea inside this cluster**, using the public source cloned during CONNECTED.
 The installer downloads verified native host binaries and a separate matching
 Linux target Zarf CLI into `.tools/`, not `/usr/bin`; it never uses sudo or
 changes a remote repository. Release checksums establish download consistency,
-not independent publisher identity. The macOS ARM path is experimental. On
-2026-11-02, the CONNECTED setup completed on the MacBook Neo with Docker
-Desktop's native Linux ARM64 engine and 4 GiB assigned to Docker. The offline
-network-isolation and deployment phases remain untested on this shared host.
+not independent publisher identity.
 
 ## Run in one terminal
 
@@ -99,6 +96,9 @@ inspection. On macOS it cleans stale resources owned by LIVE-1, LIVE-2 and
 ADV-01 before starting, then removes those demo resources on exit. Errors are
 fatal; private detailed logs stay under `.state/`. Nothing falls back to an
 online deploy.
+
+Each phase prints copyable, read-only commands to inspect the staged package,
+node routes, egress counters, Zarf services, workload, SBOM, and local Git source.
 
 The two phases can also be run separately:
 
