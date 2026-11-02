@@ -7,10 +7,22 @@ source "$ROOT/scripts/common.sh"
 [[ $# -le 1 && (${1:-} == "" || ${1:-} == --tamper) ]] ||
     die "Usage: ./run-demo.sh [--tamper]"
 
+cleanup_macos_demos() {
+    bash "$ROOT/../../scripts/cleanup-macos-demos.sh"
+}
+
+if [[ "$(uname -s)" == Darwin ]]; then
+    cleanup_macos_demos
+fi
+
 cleanup() {
     local status=$? elapsed
     trap - EXIT
-    "$DEMO_DIR/scripts/cleanup.sh" || exit 1
+    if [[ "$(uname -s)" == Darwin ]]; then
+        cleanup_macos_demos || status=1
+    else
+        "$DEMO_DIR/scripts/cleanup.sh" || status=1
+    fi
     if [[ "$status" == 0 ]]; then
         elapsed=$((SECONDS - started))
         printf '\nTOTAL: %ss including cleanup.\n' "$elapsed"

@@ -48,7 +48,9 @@ select other IDs there. `adv-12` (Kubean) alone needs about 60–80 GB.
 
 The provisioner supports **Ubuntu x86_64**; experimental macOS ARM provisioning
 is limited to `live-1`, `live-2` and `adv-01` and uses Homebrew Bash and GNU
-tools. On another OS, use `./scripts/provision-host.sh --dry-run` (requires
+tools. On macOS, their top-level `run-demo.sh` wrappers clean stale resources
+owned by these demos before starting and clean them again on exit. On another
+OS, use `./scripts/provision-host.sh --dry-run` (requires
 Bash 4.3 or newer) to print the required commands, package equivalents, missing
 tools and planned per-demo actions. This mode does not install packages,
 download files, invoke Docker or run demo scripts; it can be combined with

@@ -56,8 +56,9 @@ Gitea inside this cluster**, using the public source cloned during CONNECTED.
 ## Prerequisites
 
 - A local Docker engine matching the host architecture, with permission to run
-  privileged k3d containers. At least 4 CPUs, 8 GiB available RAM and **8 GiB
-  free disk**.
+  privileged k3d containers. At least 4 CPUs, **8 GiB available RAM recommended**
+  and **8 GiB free disk**. A full lifecycle run has also passed once in a
+  constrained 4 GiB Linux KVM guest; see the test record below.
 - **Experimental macOS ARM:** use Docker Desktop's native Linux ARM64 engine.
   Install Homebrew Bash 4+, `coreutils`, `findutils`, `gawk`, `gnu-sed`,
   `gnu-tar`, `grep` and `jq`; expose their `gnubin` command paths.
@@ -74,8 +75,10 @@ Gitea inside this cluster**, using the public source cloned during CONNECTED.
 The installer downloads verified native host binaries and a separate matching
 Linux target Zarf CLI into `.tools/`, not `/usr/bin`; it never uses sudo or
 changes a remote repository. Release checksums establish download consistency,
-not independent publisher identity. The macOS path is experimental and has not
-yet been end-to-end validated on the MacBook Neo.
+not independent publisher identity. The macOS ARM path is experimental. On
+2026-11-02, the CONNECTED setup completed on the MacBook Neo with Docker
+Desktop's native Linux ARM64 engine and 4 GiB assigned to Docker. The offline
+network-isolation and deployment phases remain untested on this shared host.
 
 ## Run in one terminal
 
@@ -91,9 +94,11 @@ cd advanced-demos/zarf-package-lifecycle
 ```
 
 Banners, clears on interactive terminals and one-second sleeps separate the
-beats. The script leaves the cluster **isolated and alive** for inspection.
-Errors are fatal; private detailed logs stay under `.state/`. Nothing falls
-back to an online deploy.
+beats. On Linux, the script leaves the cluster **isolated and alive** for
+inspection. On macOS it cleans stale resources owned by LIVE-1, LIVE-2 and
+ADV-01 before starting, then removes those demo resources on exit. Errors are
+fatal; private detailed logs stay under `.state/`. Nothing falls back to an
+online deploy.
 
 The two phases can also be run separately:
 
@@ -326,6 +331,13 @@ Private failure logs stay in `.state/signing-*.log`, and firewall evidence is
 saved as `artifacts/signing-test-egress.txt`.
 
 ## Tested with
+
+Constrained-memory test: **2026-11-02**, Ubuntu 22.04 x86_64 KVM guest with
+4 GiB RAM and 4 vCPUs, Docker Engine 29.1.3. The complete signed lifecycle passed
+in **190 seconds**, including init, deploy, SBOM/Git checks and zero forbidden
+egress attempts. No Zarf workload resource requests were reduced for this run.
+This is one successful constrained run, not a guarantee for every 4 GiB host;
+8 GiB remains recommended for headroom.
 
 Recording retest: **2026-11-02**, Docker 29.9.2 on Linux amd64, using
 asciinema 3.2.1, agg 1.9.0, FFmpeg 6.1.1 and Node.js 24.22.1. Full capture and MP4

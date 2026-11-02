@@ -81,6 +81,11 @@ cd live-demos/1-pull-through-cache-zot
 ./scripts/stop-cache.sh
 ```
 
+For a complete run with automatic cleanup on macOS, use
+`./scripts/run-demo.sh`. It stops this demo's old Compose project before
+starting and removes its containers and networks on exit, including failure or
+interrupt. The cache volume and downloaded images are retained.
+
 Run each command when ready to advance your narration. Each phase clears an
 interactive terminal and prints a banner; redirected/non-interactive output
 retains every phase. Verification pauses for Enter after the direct pull failure
