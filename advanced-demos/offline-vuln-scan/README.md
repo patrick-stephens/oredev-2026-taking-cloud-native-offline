@@ -44,11 +44,17 @@ Docker image cache. No external port is published for the registry.
 
 ## Prerequisites
 
-- Linux amd64, Bash 4+, a local Docker Engine/CLI with permission to use the
-  daemon and `/var/run/docker.sock`, and an interactive terminal for presenter
-  pauses (optional). ARM64 release selection is implemented but untested.
+- Linux amd64 or ARM64, Bash 4+, a local Docker Engine/CLI, and an interactive
+  terminal for presenter pauses (optional). Experimental macOS ARM64 is also
+  supported with Docker Desktop and Homebrew Bash 4+; macOS and Linux scanner
+  binaries are selected separately. Native Darwin scanners prepare databases
+  and validate the connected image; the transport archive contains Linux
+  scanners matched to Docker's native engine architecture. The Mac path requires
+  a Linux ARM64 Docker Engine and does not use x86 emulation.
 - `curl`, GNU `tar`, `sha256sum`, `jq`, `timeout`, `date`, `du`, `cut`, and
-  `tail` on the host, plus `install`, GNU `stat`, `grep`, `id`, and `uname`.
+  `tail` on the host, plus `install`, `grep`, `id`, and `uname`. On macOS, install
+  Homebrew `coreutils`, `gnu-tar`, `grep`, `jq` and `bash`; the scripts add their
+  GNU command directories to `PATH`.
 - CONNECTED access to GitHub release downloads, Docker Hub, GHCR/Quay as used by
   pinned tool images, Trivy's DB repositories, and Grype's DB endpoint. A proxy
   may be required in restricted networks.
@@ -75,11 +81,21 @@ cd advanced-demos/offline-vuln-scan
 ./scripts/run-demo.sh
 ```
 
+Use `./scripts/run-demo.sh --connected-only` to build and verify the transport
+archive, then stop before creating the internal network. This mode is used by
+the experimental macOS connected test. The full demo only isolates containers
+on its labelled Docker `--internal` network; it does not change host routes,
+firewall rules, or host networking.
+
 The orchestrator creates two explicitly labelled phases and pauses for
 presenter narration between them in an interactive terminal. Use
 `DEMO_AUTO_ADVANCE=1 ./scripts/run-demo.sh` to skip prompts in automated runs.
 It uses short sleeps between banners and clears an interactive terminal between
 phases.
+
+Each phase prints copyable inspection commands for the archive checksum and
+database metadata, internal network and registry, scanner reports, policy
+decision, and captured egress/update failures.
 
 ### CONNECTED phase
 
@@ -100,9 +116,13 @@ snapshot records Grype's schema and build time. A `SHA256SUMS` manifest verifies
 the scanner binaries, database files, configuration and metadata after extraction;
 the adjacent archive `.sha256` file records the transport archive's checksum.
 The script also prints the Trivy DB publication/update timestamp and Grype DB
-schema/path. `copy --all` exports all images available from the Docker-daemon
-source; that source contains the locally pulled platform, not every platform
-in the upstream manifest list.
+schema/path. `docker save` produces an archive for Skopeo, avoiding a host socket
+mount into its Linux container. Skopeo runs as the invoking UID/GID so its OCI
+files remain removable by the presenter on Linux. `copy --all` exports the images available in
+that Docker archive; it contains the locally pulled platform, not every platform
+in the upstream manifest list. The connected phase checks that the transported
+Linux scanner binaries execute in the pinned offline runtime before fetching
+the databases.
 
 ### AIR-GAPPED phase
 

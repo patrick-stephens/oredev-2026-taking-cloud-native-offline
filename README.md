@@ -43,13 +43,14 @@ Follow the recommended path: LIVE-1 → LIVE-2 → ADV-05 → ADV-01 → then an
 To pre-cache the host tools, container images and downloads for every demo,
 run `./scripts/provision-host.sh` (it can be re-run safely). Use
 `--only adv-01,adv-02` or `--skip adv-12` to limit the scope, and `--list` to
-see demo IDs. macOS defaults to the supported three demos; `--only` cannot
+see demo IDs. macOS defaults to the supported four demos; `--only` cannot
 select other IDs there. `adv-12` (Kubean) alone needs about 60–80 GB.
 
 The provisioner supports **Ubuntu x86_64**; experimental macOS ARM provisioning
-is limited to `live-1`, `live-2` and `adv-01` and uses Homebrew Bash and GNU
-tools. On macOS, their top-level `run-demo.sh` wrappers clean stale resources
-owned by these demos before starting and clean them again on exit. On another
+is limited to `live-1`, `live-2`, `adv-01` and `adv-05` and uses Homebrew Bash and
+GNU tools. The LIVE-1, LIVE-2 and ADV-01 top-level `run-demo.sh` wrappers clean
+up automatically on macOS. ADV-05 leaves its internal registry available for
+inspection; run its `scripts/cleanup.sh` when finished. On another
 OS, use `./scripts/provision-host.sh --dry-run` (requires
 Bash 4.3 or newer) to print the required commands, package equivalents, missing
 tools and planned per-demo actions. This mode does not install packages,

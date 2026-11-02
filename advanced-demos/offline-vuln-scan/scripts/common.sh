@@ -4,6 +4,15 @@
 set -euo pipefail
 
 DEMO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "$(uname -s)" == Darwin ]]; then
+    homebrew_prefix="${HOMEBREW_PREFIX:-/opt/homebrew}"
+    PATH="$homebrew_prefix/bin:$PATH"
+    for formula in coreutils gnu-tar grep; do
+        gnubin="$homebrew_prefix/opt/$formula/libexec/gnubin"
+        [[ -d "$gnubin" ]] && PATH="$gnubin:$PATH"
+    done
+    export PATH
+fi
 DEMO_NETWORK="offline-vuln-scan-internal"
 DEMO_REGISTRY="offline-vuln-scan-registry"
 DEMO_NETWORK_LABEL="org.oredev.demo=offline-vuln-scan"
@@ -15,6 +24,11 @@ DEMO_GRYPE_VERSION="v0.120.1"
 DEMO_BUNDLE="$DEMO_DIR/.bundle"
 DEMO_STAGE="$DEMO_DIR/.state/stage"
 DEMO_ARCHIVE="$DEMO_DIR/artifacts/offline-vuln-scan-bundle.tar.gz"
+
+show_commands() {
+    printf '\nInspection commands:\n'
+    printf '  %s\n' "$@"
+}
 
 fail() {
     printf 'ERROR: %s\n' "$*" >&2
@@ -80,6 +94,7 @@ offline_run() {
 
 repair_generated_ownership() {
     local directory
+    [[ "$(uname -s)" == Linux ]] || return 0
     for directory in "$DEMO_BUNDLE" "$DEMO_DIR/.state"; do
         if [[ -d "$directory" ]]; then
             docker run --rm --pull=never --network none --user 0:0 \

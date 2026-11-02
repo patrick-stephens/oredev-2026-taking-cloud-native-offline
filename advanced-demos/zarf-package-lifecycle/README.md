@@ -92,8 +92,8 @@ cd advanced-demos/zarf-package-lifecycle
 
 Banners, clears on interactive terminals and one-second sleeps separate the
 beats. On Linux, the script leaves the cluster **isolated and alive** for
-inspection. On macOS it cleans stale resources owned by LIVE-1, LIVE-2 and
-ADV-01 before starting, then removes those demo resources on exit. Errors are
+inspection. On macOS it cleans stale resources owned by before starting, 
+then removes those demo resources on exit. Errors are
 fatal; private detailed logs stay under `.state/`. Nothing falls back to an
 online deploy.
 

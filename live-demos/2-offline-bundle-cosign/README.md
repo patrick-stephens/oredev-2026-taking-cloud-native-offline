@@ -120,9 +120,8 @@ cd live-demos/2-offline-bundle-cosign
 Omit `--tamper` for the positive path only. Interactive phases use `clear`,
 banners and Enter pauses; the wrapper removes its target on success, failure,
 Ctrl-C or termination. No second terminal, port-forward or manual network
-toggle is needed. On macOS it also cleans stale resources owned by LIVE-1,
-LIVE-2 and ADV-01 before starting, then cleans them again on exit. For an
-unattended rehearsal:
+toggle is needed. On macOS it also cleans stale resources before starting,
+then cleans them again on exit. For an unattended rehearsal:
 
 Each stage prints copyable, read-only commands to inspect the signed bundle,
 target routes, imported registry digest, Kubernetes pod/PVC state, and SQL result.

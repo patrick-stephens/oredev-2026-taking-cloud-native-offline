@@ -36,7 +36,7 @@ LIVE="$REPO_ROOT/live-demos"
 ADV="$REPO_ROOT/advanced-demos"
 
 DEMO_IDS=(live-1 live-2 adv-01 adv-02 adv-03 adv-04 adv-05 adv-06 adv-07 adv-08 adv-09 adv-10 adv-11 adv-12)
-MACOS_DEMO_IDS=(live-1 live-2 adv-01)
+MACOS_DEMO_IDS=(live-1 live-2 adv-01 adv-05)
 MACOS_BREW_FORMULAE=(bash coreutils findutils gawk gnu-sed gnu-tar grep jq)
 declare -A DEMO_PATH=(
     [live-1]=live-demos/1-pull-through-cache-zot
@@ -62,7 +62,7 @@ declare -A DEMO_CMDS=(
     [adv-02]="curl sha256sum awk grep sed timeout"
     [adv-03]="flock jq diff sha256sum"
     [adv-04]="curl jq openssl sha256sum tar timeout clear uname grep sed sort tr cut base64 diff date"
-    [adv-05]="curl tar sha256sum jq timeout date du cut tail install stat grep uname id"
+    [adv-05]="curl tar sha256sum jq timeout date du cut tail install grep uname id"
     [adv-06]="curl jq sha256sum tar timeout awk grep date"
     [adv-07]="git curl ssh-keygen ssh-keyscan jq sha256sum tar"
     [adv-08]="tar"
@@ -116,10 +116,10 @@ Usage: ${0##*/} [options]
 
 Pre-caches the tools, container images and downloads needed by the demos.
 Normal provisioning requires Ubuntu x86_64. Experimental macOS ARM support is
-limited to live-1, live-2 and adv-01. Dry runs work on other OSes with Bash 4.3+.
+limited to live-1, live-2, adv-01 and adv-05. Dry runs work on other OSes with Bash 4.3+.
 
 Options:
-    --only IDS             Comma-separated demo IDs (Ubuntu default: all; macOS: supported three)
+    --only IDS             Comma-separated demo IDs (Ubuntu default: all; macOS: supported demos)
   --skip IDS             Comma-separated demo IDs to skip (e.g. adv-12, which needs ~60 GiB)
     --no-system-packages   Do not install missing host commands; only report them
   --dry-run              Print requirements and actions without changing the host
