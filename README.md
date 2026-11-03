@@ -6,6 +6,8 @@ Programme link: <https://oredev.org/program/2a0459a8-4c6c-4aea-b72d-8047f40506ea
 
 Slides: <https://docs.google.com/presentation/d/e/2PACX-1vQ2VbV5OFABtogJ73npyki935Q3ixJT58kczGY9gCMnXSNrOSspu061sSz5nvC2fzAf8W6CTAUfaR3u/pub?start=true&loop=false&delayms=60000>
 
+Based on a previous talk with demo here: <https://github.com/patrick-stephens/kcd-uk-2025-taking-cloud-native-offline/tree/main/monitoring-stack>
+
 ## Why
 
 This project explores how to keep cloud-native systems secure, resilient, sovereign, and portable when internet access is constrained or absent. It treats disconnected operation as a design capability, not an emergency exception. The rule of thumb is: “if it runs in a Faraday cage, it runs anywhere.” Every demo documents its external dependencies and transfer boundaries: no hidden assumptions.
