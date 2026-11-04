@@ -26,6 +26,14 @@ zarf package create .
 We can specify an architecture as well, e.g. `--architecture arm64`.
 We can also create differential packages with `--differential`: <https://docs.zarf.dev/tutorials/9-package-create-differential/>.
 
+The contents of the tarball can be displayed via the standard `tar` command:
+
+```shell
+tar -ztvf ./zarf-package-*.tar.zst
+```
+
+macOS may need `brew install zstd` to enable its usage above by tar, compression of the package can also be disabled entirely: <https://docs.zarf.dev/ref/packages/#local-tarball-path-tar-and-tarzst>.
+
 Set up the demo cluster, this would be done however you normally do it with `zarf tools download-init` giving you a package to install as well:
 
 ```shell
@@ -41,6 +49,14 @@ zarf package deploy ./zarf-package-*.zst --confirm
 ```
 
 You can even deploy a k3s cluster as well: `zarf init --components k3s,git-server --confirm`
+
+Get the Zarf deployed component credentials (gitea) and connection details via the `zarf tools get-creds` command.
+
+Connect to Gitea with the `zarf connect` command which is just a glorified port-forward:
+
+```shell
+zarf connect git
+```
 
 Connect to Grafana with `admin:prom-operator` credentials by default:
 
@@ -69,6 +85,7 @@ Issues:
 
 * `unable to find pod attached to given resource: unable to find the service: services "zarf-gitea-http" not found`
   * Missing git server during: `zarf init --confirm --components=git-server`
+* Missing git repo if `required: false` is set, switch to `true`.
 
 ## Hauler
 

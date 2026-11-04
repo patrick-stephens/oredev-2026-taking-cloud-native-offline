@@ -10,8 +10,11 @@ components:
     repos:
       - https://github.com/telemetryforge/fluent-bit-examples.git
     # Triggers a disconnected failure as missing gitea unless you do
-    # zarf init --components=git-server
-    required: false
+    # zarf init --components=git-servers
+    # If set to false then may not push the actual repo to the cluster later
+    required: true
+    # The repository name when pushed to gitea is currently not controllable so includes a datestamp
+    # https://github.com/zarf-dev/zarf/issues/1869
   - name: kube-prometheus-stack
     description: "A collection of Kubernetes manifests, Grafana dashboards, and Prometheus rules combined with documentation and scripts to provide easy to operate end-to-end Kubernetes cluster monitoring with Prometheus using the Prometheus Operator."
     required: true
