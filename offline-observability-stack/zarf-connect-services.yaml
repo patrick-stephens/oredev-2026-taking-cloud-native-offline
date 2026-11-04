@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-connect-dashboard
+  labels:
+    # Enables "zarf connect grafana-dashboard"
+    zarf.dev/connect-name: grafana-dashboard
+  annotations:
+    zarf.dev/connect-description: "The Grafana dashboard for viewing logs and metrics"
+spec:
+  selector:
+    app.kubernetes.io/instance: kube-prom-stack
+    app.kubernetes.io/name: grafana
+  ports:
+    - name: http
+      port: 3000
+      protocol: TCP
+      targetPort: 3000

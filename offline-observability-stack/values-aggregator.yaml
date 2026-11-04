@@ -1,0 +1,43 @@
+kind: Deployment
+replicaCount: 3
+
+# image:
+#   repository: ghcr.io/telemetryforge/agent
+#   tag: 25.10.2
+
+service:
+  type: ClusterIP
+  port: 2020
+  name: http
+
+serviceMonitor:
+  enabled: true
+  path: /api/v2/metrics/prometheus
+  selector:
+    release: kube-prom-stack
+
+config:
+  extraFiles:
+    fluent-bit.yaml: |
+      service:
+        # Required for health checks
+        http_server: on
+      pipeline:
+        inputs:
+          - name: forward
+            port: 24224
+            listen: 0.0.0.0
+
+        outputs:
+          - name: stdout
+            match: "*"
+
+extraPorts:
+  - name: forward
+    containerPort: 24224
+    port: 24224
+    protocol: TCP
+
+args:
+  - --workdir=/fluent-bit/etc
+  - --config=/fluent-bit/etc/conf/fluent-bit.yaml

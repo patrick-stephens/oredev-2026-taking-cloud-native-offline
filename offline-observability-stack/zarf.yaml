@@ -1,0 +1,74 @@
+kind: ZarfPackageConfig
+metadata:
+  name: monitoring-stack
+  description: Offline version of Telemetry Forge example monitoring stack
+  authors: Patrick Stephens <pat@telemetryforge.io>
+  version: 2026.11.05
+components:
+  - name: examples-repository
+    description: "A repository of example configurations for Fluent Bit"
+    repos:
+      - https://github.com/telemetryforge/fluent-bit-examples.git
+    # Triggers a disconnected failure as missing gitea unless you do
+    # zarf init --components=git-server
+    required: false
+  - name: kube-prometheus-stack
+    description: "A collection of Kubernetes manifests, Grafana dashboards, and Prometheus rules combined with documentation and scripts to provide easy to operate end-to-end Kubernetes cluster monitoring with Prometheus using the Prometheus Operator."
+    required: true
+    charts:
+      - name: kube-prometheus-stack-oci
+        url: oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack
+        version: 78.2.1
+        namespace: monitoring
+        releaseName: kube-prom-stack
+    images:
+      # docker exec -it $(kind get clusters | head -1)-control-plane crictl images
+      # zarf dev find-images
+      - docker.io/bats/bats:v1.4.1
+      - docker.io/grafana/grafana:12.2.0
+      - quay.io/kiwigrid/k8s-sidecar:1.30.10
+      - quay.io/prometheus-operator/prometheus-operator:v0.86.0
+      - quay.io/prometheus/node-exporter:v1.9.1
+      - registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.3
+      - registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.17.0
+      # Possible images - kube-prometheus-stack
+      - quay.io/prometheus-operator/prometheus-config-reloader:v0.86.0
+      - quay.io/prometheus/alertmanager:v0.28.1
+      - quay.io/prometheus/prometheus:v3.6.0
+      - quay.io/thanos/thanos:v0.39.2
+      # Cosign artifacts for images - kube-prometheus-stack
+      - quay.io/prometheus-operator/prometheus-operator:sha256-bbd4ff793b3677369005d2c167e5bba362ed31e4ad5f7a0085bdea2e84200c41.sig
+      - registry.k8s.io/ingress-nginx/kube-webhook-certgen:sha256-3d671cf20a35cd94efc5dcd484970779eb21e7938c98fbc3673693b8a117cf39.sig
+      - registry.k8s.io/kube-state-metrics/kube-state-metrics:sha256-2bbc915567334b13632bf62c0a97084aff72a36e13c4dabd5f2f11c898c5bacd.sig
+      - quay.io/prometheus-operator/prometheus-config-reloader:sha256-a1ccf041f1abe8fecb7985964f5488019bdbeed6d3a88ede855cf69a8c374abb.sig
+    manifests:
+      - name: connect-services
+        namespace: monitoring
+        files:
+          - zarf-connect-services.yaml
+  - name: fluent-bit
+    description: "A lightweight and high-performance log processor and forwarder"
+    required: true
+    charts:
+      - name: fluent-bit-forwarder
+        url: https://fluent.github.io/helm-charts
+        version: 0.54.0
+        namespace: monitoring
+        repoName: fluent-bit
+        releaseName: fluent-bit-forwarder
+        valuesFiles:
+          - values-ds.yaml
+      - name: fluent-bit-aggregator
+        url: https://fluent.github.io/helm-charts
+        version: 0.54.0
+        namespace: monitoring
+        repoName: fluent-bit
+        releaseName: fluent-bit-aggregator
+        valuesFiles:
+          - values-aggregator.yaml
+    images:
+      - busybox:latest
+      - cr.fluentbit.io/fluent/fluent-bit:4.1.0
+      - ghcr.io/telemetryforge/agent:25.10.2
+      # Cosign artifacts for images - fluent-bit
+      - cr.fluentbit.io/fluent/fluent-bit:sha256-4d2d8b84bb33b1a641ecd03904c4c610ce374819546cc175bf88025a1c1683e2.sig

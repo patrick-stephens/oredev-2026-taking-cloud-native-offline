@@ -1,0 +1,46 @@
+# image:
+#   repository: ghcr.io/telemetryforge/agent
+#   tag: 25.10.2
+
+service:
+  type: ClusterIP
+  port: 2020
+  name: http
+
+serviceMonitor:
+  enabled: true
+  path: /api/v2/metrics/prometheus
+  selector:
+    release: kube-prom-stack
+
+config:
+  extraFiles:
+    fluent-bit.yaml: |
+      service:
+        # Required for health checks
+        http_server: on
+      pipeline:
+        inputs:
+          - name: tail
+            tag: kube.*
+            path: /var/log/containers/*.log
+            multiline.parser: docker, cri
+            Skip_Long_Lines: On
+            processors:
+              logs:
+                - name: kubernetes
+                  kube_tag_prefix: kube.var.log.containers.
+                  merge_log: on
+
+        outputs:
+          - name: forward
+            host: fluent-bit-aggregator
+            port: 24224
+            match: "*"
+            retry_limit: 1
+            tls: off
+            compress: gzip
+
+args:
+  - --workdir=/fluent-bit/etc
+  - --config=/fluent-bit/etc/conf/fluent-bit.yaml
